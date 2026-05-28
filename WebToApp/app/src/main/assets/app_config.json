@@ -1,21 +1,13 @@
 {
-  "appName": "منشئ التطبيقات الذكي",
-  "primaryUrl": "https://weptoapk.vercel.app/",
-  "logoUrl": "https://weptoapk.vercel.app/builds/uploaded_icon_1780001465178.jpeg",
-  "appPackage": "com.wepto.apk",
-  "themeColorHex": "#2196F3",
-  "isDarkTheme": false,
+  "appName": "تطبيق تجريبي",
+  "primaryUrl": "https://google.com",
+  "logoUrl": "",
+  "splashImageUrl": "",
+  "appPackage": "com.demo.test",
+  "themeColorHex": "#FF5722",
+  "isDarkTheme": true,
+  "sidebarItems": [],
   "enableZoom": true,
   "showProgressBar": true,
-  "userAgent": "Mozilla/5.0 Mobile",
-  "sidebarItems": [
-    {
-      "id": "page_tmax2eyyy",
-      "title": "ابلي",
-      "type": "WEB_URL",
-      "urlOrContent": "ابليب",
-      "iconName": "Home"
-    }
-  ],
-  "splashImageUrl": "https://weptoapk.vercel.app/builds/uploaded_icon_1780001467367.jpeg"
+  "userAgent": ""
 }
