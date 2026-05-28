@@ -7,7 +7,7 @@
   "themeColorHex": "#2196F3",
   "isDarkTheme": true,
   "sidebarItems": [],
-  "enableZoom": true,
+  "enableZoom": false,
   "showProgressBar": true,
   "userAgent": ""
 }
