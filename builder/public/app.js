@@ -820,6 +820,8 @@ function setupBuildAction() {
             // Progress Bar animation setup
             let progress = 0;
             let progressInterval = null;
+            let buildCompleted = false;
+            let isReconnecting = false;
             
             const startProgress = () => {
                 elements.buildProgressContainer.classList.remove('hidden');
@@ -879,6 +881,7 @@ function setupBuildAction() {
                 const data = JSON.parse(e.data);
                 
                 if (data.log === "STREAM_END") {
+                    buildCompleted = true;
                     eventSource.close();
                     updateBuildStatus(data.status);
                     elements.generateApkBtn.disabled = false;
@@ -896,6 +899,12 @@ function setupBuildAction() {
                     return;
                 }
                 
+                if (isReconnecting) {
+                    elements.consoleOutputContainer.innerHTML = '';
+                    logConsole("تم إعادة الاتصال بنجاح. جاري تحديث سجلات التجميع...", 'success-msg');
+                    isReconnecting = false;
+                }
+
                 // Print logs in terminal window
                 if (data.log.startsWith('[ERROR]')) {
                     logConsole(data.log, 'error-msg');
@@ -905,11 +914,18 @@ function setupBuildAction() {
             };
             
             eventSource.onerror = (err) => {
-                eventSource.close();
-                completeProgress(false);
-                logConsole("EventSource connection lost.", 'error-msg');
-                elements.generateApkBtn.disabled = false;
-                updateBuildStatus('failed');
+                if (eventSource.readyState === EventSource.CLOSED) {
+                    eventSource.close();
+                    if (!buildCompleted) {
+                        completeProgress(false);
+                        logConsole("انقطع الاتصال بالسيرفر بشكل نهائي (EventSource connection closed).", 'error-msg');
+                        elements.generateApkBtn.disabled = false;
+                        updateBuildStatus('failed');
+                    }
+                } else if (eventSource.readyState === EventSource.CONNECTING) {
+                    isReconnecting = true;
+                    logConsole("فقد الاتصال بالسيرفر. جاري محاولة إعادة الاتصال تلقائياً...", 'system-msg');
+                }
             };
             
         } catch (err) {

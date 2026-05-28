@@ -360,6 +360,10 @@ app.get('/api/build/logs', async (req, res) => {
             appPackage = decoded.appPackage || appPackage;
         }
 
+        let lastReportedStepName = "";
+        let lastReportedStepStatus = "";
+        let lastReportedRunStatus = "";
+
         // Poll GitHub Actions
         const intervalId = setInterval(async () => {
             try {
@@ -370,7 +374,43 @@ app.get('/api/build/logs', async (req, res) => {
                         return;
                     }
 
-                    res.write(`data: ${JSON.stringify({ log: `GitHub Action Status: ${run.status} (${run.conclusion || 'running'})`, status: session.buildStatus })}\n\n`);
+                    let detailedLog = null;
+                    const runStatusStr = `${run.status} (${run.conclusion || 'running'})`;
+
+                    try {
+                        const jobsData = await githubApi.githubRequest('GET', `/actions/runs/${run.id}/jobs`);
+                        if (jobsData && jobsData.jobs && jobsData.jobs.length > 0) {
+                            const job = jobsData.jobs[0];
+                            if (job.steps && job.steps.length > 0) {
+                                // Find active step or last completed step
+                                const activeStep = job.steps.find(s => s.status === 'in_progress')
+                                    || [...job.steps].reverse().find(s => s.status === 'completed')
+                                    || job.steps[0];
+                                
+                                if (activeStep) {
+                                    const stepInfo = `[GitHub Action] Step: ${activeStep.name} - ${activeStep.status}${activeStep.conclusion ? ` (${activeStep.conclusion})` : ''}`;
+                                    if (activeStep.name !== lastReportedStepName || activeStep.status !== lastReportedStepStatus) {
+                                        detailedLog = stepInfo;
+                                        lastReportedStepName = activeStep.name;
+                                        lastReportedStepStatus = activeStep.status;
+                                    }
+                                }
+                            }
+                        }
+                    } catch (err) {
+                        console.error("Error fetching workflow jobs:", err);
+                    }
+
+                    // Fallback to general run status if no step info or run status changed
+                    if (!detailedLog && runStatusStr !== lastReportedRunStatus) {
+                        detailedLog = `GitHub Action Status: ${runStatusStr}`;
+                        lastReportedRunStatus = runStatusStr;
+                    }
+
+                    if (detailedLog) {
+                        res.write(`data: ${JSON.stringify({ log: detailedLog, status: session.buildStatus })}\n\n`);
+                    }
+
                     if (run.status === 'completed') {
                         session.buildStatus = run.conclusion === 'success' ? 'success' : 'failed';
                         const downloadUrl = `/api/download?tag=v-${run.run_number}&filename=${encodeURIComponent(appName)}.apk`;
