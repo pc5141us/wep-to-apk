@@ -12,9 +12,38 @@ const PORT = process.env.PORT || 3000;
 const ANDROID_PROJECT_DIR = process.env.ANDROID_PROJECT_DIR || path.join(__dirname, '../WebToApp');
 const CONFIG_FILE_PATH = path.join(ANDROID_PROJECT_DIR, 'app/src/main/assets/app_config.json');
 const BUILDS_DIR = path.join(__dirname, 'public/builds');
+const SESSIONS_DIR = path.join(__dirname, 'sessions');
 
 if (!fs.existsSync(BUILDS_DIR)) {
     fs.mkdirSync(BUILDS_DIR, { recursive: true });
+}
+if (!fs.existsSync(SESSIONS_DIR)) {
+    fs.mkdirSync(SESSIONS_DIR, { recursive: true });
+}
+
+// Session state storage
+const sessions = {};
+let globalBuildInProgress = false; // Lock to prevent simultaneous local compilation
+
+function getSession(sessionId) {
+    const id = sessionId || 'default';
+    if (!sessions[id]) {
+        sessions[id] = {
+            buildLogs: [],
+            buildStatus: 'idle',
+            lastRunId: null
+        };
+    }
+    return sessions[id];
+}
+
+function getSessionConfigPath(sessionId) {
+    const id = sessionId || 'default';
+    const dir = path.join(SESSIONS_DIR, id);
+    if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+    }
+    return path.join(dir, 'app_config.json');
 }
 
 app.use(express.json({ limit: '10mb' }));
@@ -23,6 +52,15 @@ app.use(express.static(path.join(__dirname, 'public')));
 // Fetch Config
 app.get('/api/config', async (req, res) => {
     try {
+        const sessionId = req.query.sessionId || 'default';
+        const sessionConfigPath = getSessionConfigPath(sessionId);
+
+        // If session specific config exists, return it
+        if (fs.existsSync(sessionConfigPath)) {
+            const config = JSON.parse(fs.readFileSync(sessionConfigPath, 'utf8'));
+            return res.json(config);
+        }
+
         if (githubApi.isGithubEnvSet()) {
             // Fetch from GitHub directly to get latest state in Vercel
             const https = require('https');
@@ -39,7 +77,10 @@ app.get('/api/config', async (req, res) => {
                         const parsed = JSON.parse(data);
                         if (parsed.content) {
                             const decoded = Buffer.from(parsed.content, 'base64').toString('utf8');
-                            res.json(JSON.parse(decoded));
+                            const config = JSON.parse(decoded);
+                            // Cache to session config path
+                            fs.writeFileSync(sessionConfigPath, JSON.stringify(config, null, 2), 'utf8');
+                            res.json(config);
                         } else {
                             res.status(404).json({ error: "Config not found on GitHub" });
                         }
@@ -51,12 +92,29 @@ app.get('/api/config', async (req, res) => {
             return;
         }
 
-        // Local fallback
+        // Local fallback to main config
         if (fs.existsSync(CONFIG_FILE_PATH)) {
             const config = JSON.parse(fs.readFileSync(CONFIG_FILE_PATH, 'utf8'));
+            // Cache to session config path
+            fs.writeFileSync(sessionConfigPath, JSON.stringify(config, null, 2), 'utf8');
             res.json(config);
         } else {
-            res.status(404).json({ error: "Config file not found locally" });
+            // Return default initial config structure
+            const defaultEmptyConfig = {
+                appName: "جوجل",
+                primaryUrl: "https://www.google.com",
+                logoUrl: "https://www.google.com/images/branding/googlelogo/2x/googlelogo_color_92x30dp.png",
+                splashImageUrl: "",
+                appPackage: "com.example.webtoapp.google",
+                themeColorHex: "#2196F3",
+                isDarkTheme: false,
+                sidebarItems: [],
+                enableZoom: true,
+                showProgressBar: true,
+                userAgent: ""
+            };
+            fs.writeFileSync(sessionConfigPath, JSON.stringify(defaultEmptyConfig, null, 2), 'utf8');
+            res.json(defaultEmptyConfig);
         }
     } catch (e) {
         res.status(500).json({ error: "Error loading configuration" });
@@ -66,9 +124,13 @@ app.get('/api/config', async (req, res) => {
 // Save Config
 app.post('/api/config', async (req, res) => {
     try {
+        const sessionId = req.query.sessionId || req.body.sessionId || 'default';
+        const sessionConfigPath = getSessionConfigPath(sessionId);
         const config = req.body;
         const configString = JSON.stringify(config, null, 2);
         
+        fs.writeFileSync(sessionConfigPath, configString, 'utf8');
+
         if (githubApi.isGithubEnvSet()) {
             // Push to GitHub
             const base64Content = Buffer.from(configString).toString('base64');
@@ -77,13 +139,7 @@ app.post('/api/config', async (req, res) => {
             return;
         }
 
-        // Local fallback
-        const assetsDir = path.dirname(CONFIG_FILE_PATH);
-        if (!fs.existsSync(assetsDir)) {
-            fs.mkdirSync(assetsDir, { recursive: true });
-        }
-        fs.writeFileSync(CONFIG_FILE_PATH, configString, 'utf8');
-        res.json({ success: true, message: "Configuration saved locally" });
+        res.json({ success: true, message: "Configuration saved locally for session" });
     } catch (e) {
         res.status(500).json({ error: `Error saving configuration: ${e.message}` });
     }
@@ -92,6 +148,7 @@ app.post('/api/config', async (req, res) => {
 // Upload Icon
 app.post('/api/upload-icon', async (req, res) => {
     try {
+        const sessionId = req.query.sessionId || 'default';
         const { base64Data } = req.body;
         if (!base64Data) {
             return res.status(400).json({ error: "No image data provided" });
@@ -99,7 +156,7 @@ app.post('/api/upload-icon', async (req, res) => {
 
         const matches = base64Data.match(/^data:image\/([a-zA-Z0-9]+);base64,/);
         const ext = matches ? matches[1] : 'png';
-        const fileName = `uploaded_icon_${Date.now()}.${ext}`;
+        const fileName = `uploaded_icon_${sessionId}_${Date.now()}.${ext}`;
         
         if (githubApi.isGithubEnvSet()) {
             const githubPath = `builder/public/builds/${fileName}`;
@@ -119,25 +176,23 @@ app.post('/api/upload-icon', async (req, res) => {
 });
 
 // Build APK endpoint
-let activeBuildProcess = null;
-let buildLogs = [];
-let buildStatus = 'idle';
-let lastRunId = null;
-
 app.post('/api/build', async (req, res) => {
     try {
-        buildLogs = [];
-        buildStatus = 'building';
+        const sessionId = req.query.sessionId || req.body.sessionId || 'default';
+        const session = getSession(sessionId);
+        
+        session.buildLogs = [];
+        session.buildStatus = 'building';
         
         if (githubApi.isGithubEnvSet()) {
-            buildLogs.push("Triggering GitHub Actions Build Workflow...");
+            session.buildLogs.push("Triggering GitHub Actions Build Workflow...");
             
             // Get the ID of the latest run BEFORE triggering the new one to prevent polling old completed runs
             try {
                 const latestRun = await githubApi.getLatestWorkflowRun();
                 if (latestRun) {
-                    lastRunId = latestRun.id;
-                    console.log(`Stored lastRunId: ${lastRunId} before triggering`);
+                    session.lastRunId = latestRun.id;
+                    console.log(`Stored lastRunId: ${session.lastRunId} before triggering`);
                 }
             } catch(e) {
                 console.error("Failed to get latest run ID before trigger:", e);
@@ -154,81 +209,70 @@ app.post('/api/build', async (req, res) => {
                 appConfigStr = JSON.stringify(config);
                 console.log(`Using dynamic configuration passed in request body: ${appName}`);
             } else {
-                try {
-                    const https = require('https');
-                    const configData = await new Promise((resolve, reject) => {
-                        const options = {
-                            hostname: 'api.github.com',
-                            path: `/repos/${process.env.GITHUB_REPO}/contents/WebToApp/app/src/main/assets/app_config.json`,
-                            headers: { 
-                                'User-Agent': 'WebToApp-Builder', 
-                                'Authorization': `Bearer ${process.env.GITHUB_TOKEN}`,
-                                'Accept': 'application/vnd.github.v3+json'
-                            }
-                        };
-                        https.get(options, (response) => {
-                            let data = '';
-                            response.on('data', chunk => data += chunk);
-                            response.on('end', () => {
-                                try {
-                                    resolve(JSON.parse(data));
-                                } catch(e) {
-                                    resolve({});
-                                }
-                            });
-                        }).on('error', reject);
-                    });
-                    if (configData.content) {
-                        const decoded = JSON.parse(Buffer.from(configData.content, 'base64').toString('utf8'));
-                        appName = decoded.appName || appName;
-                        appPackage = decoded.appPackage || appPackage;
-                        appConfigStr = JSON.stringify(decoded);
-                    }
-                } catch (e) {
-                    console.error("Failed to read latest config from GitHub:", e);
+                const sessionConfigPath = getSessionConfigPath(sessionId);
+                if (fs.existsSync(sessionConfigPath)) {
+                    const decoded = JSON.parse(fs.readFileSync(sessionConfigPath, 'utf8'));
+                    appName = decoded.appName || appName;
+                    appPackage = decoded.appPackage || appPackage;
+                    appConfigStr = JSON.stringify(decoded);
                 }
             }
             
             await githubApi.triggerWorkflow(appName, appPackage, appConfigStr);
-            buildLogs.push("Workflow triggered successfully!");
-            buildLogs.push("Waiting for GitHub Actions to start...");
+            session.buildLogs.push("Workflow triggered successfully!");
+            session.buildLogs.push("Waiting for GitHub Actions to start...");
             
-            // We simulate the build progress by checking GitHub Actions API in the logs endpoint
             res.json({ success: true, message: "GitHub Actions Build triggered" });
             return;
         }
 
         // Local Build fallback
-        if (activeBuildProcess) {
-            return res.status(400).json({ error: "Build already in progress locally" });
+        if (globalBuildInProgress) {
+            return res.status(400).json({ error: "تجميع تطبيق آخر قيد التشغيل حالياً. يرجى المحاولة لاحقاً." });
         }
         
-        buildLogs.push("Starting local Gradle build...");
+        globalBuildInProgress = true;
+        session.buildLogs.push("Starting local Gradle build...");
+        
+        // Copy session's config to main app_config.json so compiler uses it!
+        const sessionConfigPath = getSessionConfigPath(sessionId);
+        if (fs.existsSync(sessionConfigPath)) {
+            const configString = fs.readFileSync(sessionConfigPath, 'utf8');
+            const assetsDir = path.dirname(CONFIG_FILE_PATH);
+            if (!fs.existsSync(assetsDir)) {
+                fs.mkdirSync(assetsDir, { recursive: true });
+            }
+            fs.writeFileSync(CONFIG_FILE_PATH, configString, 'utf8');
+        }
+
         const gradlewCmd = process.platform === 'win32' ? 'gradlew.bat' : './gradlew';
         
-        activeBuildProcess = spawn(gradlewCmd, ['assembleDebug', '--stacktrace'], {
+        const activeBuildProcess = spawn(gradlewCmd, ['assembleDebug', '--stacktrace'], {
             cwd: ANDROID_PROJECT_DIR,
             env: { ...process.env, PAGER: 'cat' }
         });
 
-        activeBuildProcess.stdout.on('data', (data) => buildLogs.push(data.toString().trim()));
-        activeBuildProcess.stderr.on('data', (data) => buildLogs.push(`[ERROR] ${data.toString().trim()}`));
+        activeBuildProcess.stdout.on('data', (data) => session.buildLogs.push(data.toString().trim()));
+        activeBuildProcess.stderr.on('data', (data) => session.buildLogs.push(`[ERROR] ${data.toString().trim()}`));
 
         activeBuildProcess.on('close', (code) => {
-            activeBuildProcess = null;
+            globalBuildInProgress = false;
             if (code === 0) {
-                buildStatus = 'success';
-                buildLogs.push("Local Build completed successfully!");
+                session.buildStatus = 'success';
+                session.buildLogs.push("Local Build completed successfully!");
             } else {
-                buildStatus = 'failed';
-                buildLogs.push(`Local Gradle build failed with exit code: ${code}`);
+                session.buildStatus = 'failed';
+                session.buildLogs.push(`Local Gradle build failed with exit code: ${code}`);
             }
         });
 
         res.json({ success: true, message: "Local Build process started" });
     } catch (e) {
-        buildStatus = 'failed';
-        buildLogs.push(`Build start error: ${e.message}`);
+        globalBuildInProgress = false;
+        const sessionId = req.query.sessionId || req.body.sessionId || 'default';
+        const session = getSession(sessionId);
+        session.buildStatus = 'failed';
+        session.buildLogs.push(`Build start error: ${e.message}`);
         res.status(500).json({ error: `Error starting build: ${e.message}` });
     }
 });
@@ -240,41 +284,22 @@ app.get('/api/build/logs', async (req, res) => {
     res.setHeader('Connection', 'keep-alive');
     res.flushHeaders();
 
+    const sessionId = req.query.sessionId || 'default';
+    const session = getSession(sessionId);
+
     if (githubApi.isGithubEnvSet()) {
-        // State-safe config fetch from GitHub
         let appName = 'WebToApp';
         let appPackage = 'com.example.webtoapp';
-        try {
-            const https = require('https');
-            const configData = await new Promise((resolve, reject) => {
-                const options = {
-                    hostname: 'api.github.com',
-                    path: `/repos/${process.env.GITHUB_REPO}/contents/WebToApp/app/src/main/assets/app_config.json`,
-                    headers: { 
-                        'User-Agent': 'WebToApp-Builder', 
-                        'Authorization': `Bearer ${process.env.GITHUB_TOKEN}`,
-                        'Accept': 'application/vnd.github.v3+json'
-                    }
-                };
-                https.get(options, (response) => {
-                    let data = '';
-                    response.on('data', chunk => data += chunk);
-                    response.on('end', () => {
-                        try {
-                            resolve(JSON.parse(data));
-                        } catch(e) {
-                            resolve({});
-                        }
-                    });
-                }).on('error', reject);
-            });
-            if (configData.content) {
-                const decoded = JSON.parse(Buffer.from(configData.content, 'base64').toString('utf8'));
+        
+        const sessionConfigPath = getSessionConfigPath(sessionId);
+        if (fs.existsSync(sessionConfigPath)) {
+            try {
+                const decoded = JSON.parse(fs.readFileSync(sessionConfigPath, 'utf8'));
                 appName = decoded.appName || appName;
                 appPackage = decoded.appPackage || appPackage;
+            } catch (e) {
+                console.error("Failed to read session config inside logs:", e);
             }
-        } catch (e) {
-            console.error("Failed to read latest config inside logs:", e);
         }
 
         // Poll GitHub Actions
@@ -282,26 +307,24 @@ app.get('/api/build/logs', async (req, res) => {
             try {
                 const run = await githubApi.getLatestWorkflowRun();
                 if (run) {
-                    // Skip if GitHub hasn't registered the new run yet
-                    if (lastRunId && run.id === lastRunId) {
+                    if (session.lastRunId && run.id === session.lastRunId) {
                         res.write(`data: ${JSON.stringify({ log: "Waiting for GitHub Actions to register the new build request...", status: 'building' })}\n\n`);
                         return;
                     }
 
-                    res.write(`data: ${JSON.stringify({ log: `GitHub Action Status: ${run.status} (${run.conclusion || 'running'})`, status: buildStatus })}\n\n`);
+                    res.write(`data: ${JSON.stringify({ log: `GitHub Action Status: ${run.status} (${run.conclusion || 'running'})`, status: session.buildStatus })}\n\n`);
                     if (run.status === 'completed') {
-                        buildStatus = run.conclusion === 'success' ? 'success' : 'failed';
-                        // Proxy download link that bypasses private repo login requirements
+                        session.buildStatus = run.conclusion === 'success' ? 'success' : 'failed';
                         const downloadUrl = `/api/download?tag=v-${run.run_number}&filename=${encodeURIComponent(appName)}.apk`;
                         res.write(`data: ${JSON.stringify({ 
-                            log: `Build finished with status: ${buildStatus}`, 
-                            status: buildStatus,
+                            log: `Build finished with status: ${session.buildStatus}`, 
+                            status: session.buildStatus,
                             apkName: downloadUrl,
                             appId: appPackage
                         })}\n\n`);
                         res.write(`data: ${JSON.stringify({ 
                             log: "STREAM_END", 
-                            status: buildStatus,
+                            status: session.buildStatus,
                             apkName: downloadUrl,
                             appId: appPackage
                         })}\n\n`);
@@ -321,15 +344,15 @@ app.get('/api/build/logs', async (req, res) => {
     // Local logging stream
     let lastSentIndex = 0;
     const intervalId = setInterval(() => {
-        if (lastSentIndex < buildLogs.length) {
-            for (let i = lastSentIndex; i < buildLogs.length; i++) {
-                res.write(`data: ${JSON.stringify({ log: buildLogs[i], status: buildStatus })}\n\n`);
+        if (lastSentIndex < session.buildLogs.length) {
+            for (let i = lastSentIndex; i < session.buildLogs.length; i++) {
+                res.write(`data: ${JSON.stringify({ log: session.buildLogs[i], status: session.buildStatus })}\n\n`);
             }
-            lastSentIndex = buildLogs.length;
+            lastSentIndex = session.buildLogs.length;
         }
 
-        if (buildStatus === 'success' || buildStatus === 'failed') {
-            res.write(`data: ${JSON.stringify({ log: "STREAM_END", status: buildStatus })}\n\n`);
+        if (session.buildStatus === 'success' || session.buildStatus === 'failed') {
+            res.write(`data: ${JSON.stringify({ log: "STREAM_END", status: session.buildStatus })}\n\n`);
             clearInterval(intervalId);
             res.end();
         }

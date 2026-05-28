@@ -1,4 +1,10 @@
 // Global State
+let sessionId = localStorage.getItem('session_id');
+if (!sessionId) {
+    sessionId = 'session_' + Math.random().toString(36).substr(2, 9);
+    localStorage.setItem('session_id', sessionId);
+}
+
 let config = {
     appName: "جوجل",
     primaryUrl: "https://www.google.com",
@@ -90,6 +96,7 @@ document.addEventListener('DOMContentLoaded', () => {
     setupModalEvents();
     setupBuildAction();
     loadConfiguration();
+    setupMobileNav();
 });
 
 // Setup Config Panels Tab Switch
@@ -193,7 +200,7 @@ function setupInputsBinding() {
             logConsole("جاري رفع الأيقونة المخصصة إلى السيرفر...", "system-msg");
             
             try {
-                const response = await fetch('/api/upload-icon', {
+                const response = await fetch(`/api/upload-icon?sessionId=${sessionId}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ base64Data })
@@ -258,7 +265,7 @@ function setupInputsBinding() {
             logConsole("جاري رفع صورة شاشة البداية...", "system-msg");
 
             try {
-                const response = await fetch('/api/upload-icon', {
+                const response = await fetch(`/api/upload-icon?sessionId=${sessionId}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ base64Data })
@@ -400,7 +407,7 @@ async function loadConfiguration() {
             config = JSON.parse(cached);
             console.log("Loaded configuration from browser localStorage.");
         } else {
-            const response = await fetch('/api/config');
+            const response = await fetch(`/api/config?sessionId=${sessionId}`);
             if (response.ok) {
                 config = await response.json();
                 console.log("Loaded fallback configuration from server.");
@@ -775,7 +782,7 @@ function savePageItem() {
 async function saveConfigToServer() {
     try {
         localStorage.setItem('app_config', JSON.stringify(config));
-        const response = await fetch('/api/config', {
+        const response = await fetch(`/api/config?sessionId=${sessionId}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(config)
@@ -798,7 +805,7 @@ function setupBuildAction() {
         
         try {
             localStorage.setItem('app_config', JSON.stringify(config));
-            const saveRes = await fetch('/api/config', {
+            const saveRes = await fetch(`/api/config?sessionId=${sessionId}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(config)
@@ -847,7 +854,7 @@ function setupBuildAction() {
             };
 
             // Step 2: Trigger build command passing config directly to isolate users
-            const buildRes = await fetch('/api/build', { 
+            const buildRes = await fetch(`/api/build?sessionId=${sessionId}`, { 
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ config: config })
@@ -859,8 +866,14 @@ function setupBuildAction() {
             updateBuildStatus('building');
             startProgress();
             
+            // Auto switch to console tab on mobile so logs can be monitored
+            const consoleTabBtn = document.querySelector('.mobile-nav-btn[data-target="console"]');
+            if (consoleTabBtn && window.innerWidth <= 1024) {
+                consoleTabBtn.click();
+            }
+            
             // Step 3: Listen to event source logs in real-time
-            const eventSource = new EventSource('/api/build/logs');
+            const eventSource = new EventSource(`/api/build/logs?sessionId=${sessionId}`);
             
             eventSource.onmessage = (e) => {
                 const data = JSON.parse(e.data);
@@ -922,7 +935,7 @@ function setupBuildAction() {
             elements.primaryUrlInput.value = config.primaryUrl;
         }
 
-        fetch('/api/config', {
+        fetch(`/api/config?sessionId=${sessionId}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(config)
@@ -1075,4 +1088,24 @@ function hexToRgb(hex) {
         g: parseInt(result[2], 16),
         b: parseInt(result[3], 16)
     } : null;
+}
+
+// Mobile navigation handling for responsive view
+function setupMobileNav() {
+    const navBar = document.querySelector('.mobile-nav-bar');
+    if (!navBar) return;
+    
+    const container = document.querySelector('.app-container');
+    const buttons = navBar.querySelectorAll('.mobile-nav-btn');
+    
+    buttons.forEach(btn => {
+        btn.addEventListener('click', () => {
+            buttons.forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            
+            container.classList.remove('show-config', 'show-preview', 'show-console');
+            const target = btn.getAttribute('data-target');
+            container.classList.add(`show-${target}`);
+        });
+    });
 }

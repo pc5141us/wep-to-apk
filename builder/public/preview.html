@@ -555,7 +555,8 @@
         // Load config from server
         async function fetchConfig() {
             try {
-                const res = await fetch('/api/config');
+                const sessionId = localStorage.getItem('session_id') || 'default';
+                const res = await fetch(`/api/config?sessionId=${sessionId}`);
                 if (res.ok) {
                     config = await res.json();
                     initializePreview();

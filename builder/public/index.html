@@ -13,7 +13,7 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
 <body>
-    <div class="app-container">
+    <div class="app-container show-config">
         <!-- Sidebar Dashboard Controls -->
         <aside class="sidebar-config">
             <div class="sidebar-header">
@@ -254,6 +254,22 @@
             </div>
         </div>
     </div>
+
+    <!-- Mobile Navigation Bar -->
+    <nav class="mobile-nav-bar">
+        <button class="mobile-nav-btn active" data-target="config">
+            <i class="fa-solid fa-sliders"></i>
+            <span>الإعدادات</span>
+        </button>
+        <button class="mobile-nav-btn" data-target="preview">
+            <i class="fa-solid fa-mobile-screen-button"></i>
+            <span>المعاينة</span>
+        </button>
+        <button class="mobile-nav-btn" data-target="console">
+            <i class="fa-solid fa-terminal"></i>
+            <span>المخرجات</span>
+        </button>
+    </nav>
 
     <script src="app.js?v=2"></script>
 </body>
