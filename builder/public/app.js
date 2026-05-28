@@ -964,7 +964,7 @@ function updateBuildStatus(status) {
 
 // Render final APK Download Button
 function renderApkDownloadButton(filename, appId) {
-    const downloadHref = filename.startsWith('http') ? filename : `/builds/${filename}`;
+    const downloadHref = (filename.startsWith('http') || filename.startsWith('/')) ? filename : `/builds/${filename}`;
     elements.apkDownloadContainer.innerHTML = `
         <div style="width: 100%; display: flex; flex-direction: column; gap: 8px;">
             <div style="background: rgba(16, 185, 129, 0.1); border: 1px dashed var(--success-color); border-radius: 6px; padding: 10px; text-align: center; font-size: 11px; color: var(--text-muted);">
