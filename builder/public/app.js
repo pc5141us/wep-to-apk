@@ -6,11 +6,11 @@ if (!sessionId) {
 }
 
 let config = {
-    appName: "جوجل",
-    primaryUrl: "https://www.google.com",
-    logoUrl: "https://www.google.com/images/branding/googlelogo/2x/googlelogo_color_92x30dp.png",
+    appName: "",
+    primaryUrl: "",
+    logoUrl: "",
     splashImageUrl: "",
-    appPackage: "com.example.webtoapp.google",
+    appPackage: "",
     themeColorHex: "#2196F3",
     isDarkTheme: false,
     sidebarItems: [],
@@ -459,9 +459,9 @@ async function loadConfiguration() {
 // Update the phone mockup simulator display
 function updateLivePreview() {
     // App Name Branding
-    elements.mockAppTitle.textContent = activePageId ? getPageTitle(activePageId) : config.appName;
+    elements.mockAppTitle.textContent = activePageId ? getPageTitle(activePageId) : (config.appName || "اسم التطبيق");
     if (elements.mockDrawerTitle) {
-        elements.mockDrawerTitle.textContent = config.appName;
+        elements.mockDrawerTitle.textContent = config.appName || "اسم التطبيق";
     }
 
     // Set CSS theme colors

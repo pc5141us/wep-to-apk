@@ -97,30 +97,22 @@ app.get('/api/config', async (req, res) => {
             return;
         }
 
-        // Local fallback to main config
-        if (fs.existsSync(CONFIG_FILE_PATH)) {
-            const config = JSON.parse(fs.readFileSync(CONFIG_FILE_PATH, 'utf8'));
-            // Cache to session config path
-            fs.writeFileSync(sessionConfigPath, JSON.stringify(config, null, 2), 'utf8');
-            res.json(config);
-        } else {
-            // Return default initial config structure
-            const defaultEmptyConfig = {
-                appName: "جوجل",
-                primaryUrl: "https://www.google.com",
-                logoUrl: "https://www.google.com/images/branding/googlelogo/2x/googlelogo_color_92x30dp.png",
-                splashImageUrl: "",
-                appPackage: "com.example.webtoapp.google",
-                themeColorHex: "#2196F3",
-                isDarkTheme: false,
-                sidebarItems: [],
-                enableZoom: true,
-                showProgressBar: true,
-                userAgent: ""
-            };
-            fs.writeFileSync(sessionConfigPath, JSON.stringify(defaultEmptyConfig, null, 2), 'utf8');
-            res.json(defaultEmptyConfig);
-        }
+        // Initialize new sessions with a clean, empty configuration
+        const defaultEmptyConfig = {
+            appName: "",
+            primaryUrl: "",
+            logoUrl: "",
+            splashImageUrl: "",
+            appPackage: "",
+            themeColorHex: "#2196F3",
+            isDarkTheme: false,
+            sidebarItems: [],
+            enableZoom: true,
+            showProgressBar: true,
+            userAgent: ""
+        };
+        fs.writeFileSync(sessionConfigPath, JSON.stringify(defaultEmptyConfig, null, 2), 'utf8');
+        res.json(defaultEmptyConfig);
     } catch (e) {
         res.status(500).json({ error: "Error loading configuration" });
     }
