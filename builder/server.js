@@ -351,7 +351,7 @@ app.get('/api/download', async (req, res) => {
             return res.status(404).send("Release or assets not found");
         }
 
-        const asset = releaseData.assets.find(a => a.name === filename);
+        const asset = releaseData.assets.find(a => a.name === filename || a.label === filename);
         if (!asset) {
             return res.status(404).send(`Asset named '${filename}' not found in release ${tag}`);
         }
