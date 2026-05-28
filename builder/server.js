@@ -122,6 +122,7 @@ app.post('/api/upload-icon', async (req, res) => {
 let activeBuildProcess = null;
 let buildLogs = [];
 let buildStatus = 'idle';
+let lastRunId = null;
 
 app.post('/api/build', async (req, res) => {
     try {
@@ -130,6 +131,17 @@ app.post('/api/build', async (req, res) => {
         
         if (githubApi.isGithubEnvSet()) {
             buildLogs.push("Triggering GitHub Actions Build Workflow...");
+            
+            // Get the ID of the latest run BEFORE triggering the new one to prevent polling old completed runs
+            try {
+                const latestRun = await githubApi.getLatestWorkflowRun();
+                if (latestRun) {
+                    lastRunId = latestRun.id;
+                    console.log(`Stored lastRunId: ${lastRunId} before triggering`);
+                }
+            } catch(e) {
+                console.error("Failed to get latest run ID before trigger:", e);
+            }
             
             // State-safe config fetch from GitHub
             let appName = 'WebToApp';
@@ -260,10 +272,17 @@ app.get('/api/build/logs', async (req, res) => {
             try {
                 const run = await githubApi.getLatestWorkflowRun();
                 if (run) {
+                    // Skip if GitHub hasn't registered the new run yet
+                    if (lastRunId && run.id === lastRunId) {
+                        res.write(`data: ${JSON.stringify({ log: "Waiting for GitHub Actions to register the new build request...", status: 'building' })}\n\n`);
+                        return;
+                    }
+
                     res.write(`data: ${JSON.stringify({ log: `GitHub Action Status: ${run.status} (${run.conclusion || 'running'})`, status: buildStatus })}\n\n`);
                     if (run.status === 'completed') {
                         buildStatus = run.conclusion === 'success' ? 'success' : 'failed';
-                        const downloadUrl = `https://github.com/${process.env.GITHUB_REPO}/releases/download/v-${run.run_number}/${encodeURIComponent(appName)}.apk`;
+                        // Proxy download link that bypasses private repo login requirements
+                        const downloadUrl = `/api/download?tag=v-${run.run_number}&filename=${encodeURIComponent(appName)}.apk`;
                         res.write(`data: ${JSON.stringify({ 
                             log: `Build finished with status: ${buildStatus}`, 
                             status: buildStatus,
@@ -307,6 +326,63 @@ app.get('/api/build/logs', async (req, res) => {
     }, 200);
 
     req.on('close', () => clearInterval(intervalId));
+});
+
+// Private Repo authenticated APK Download proxy endpoint
+app.get('/api/download', async (req, res) => {
+    const { tag, filename } = req.query;
+    if (!tag || !filename) {
+        return res.status(400).send("Missing tag or filename parameters");
+    }
+
+    try {
+        console.log(`Download request received for Tag: ${tag}, File: ${filename}`);
+        
+        // 1. Fetch release info to find asset ID
+        const releaseData = await githubApi.githubRequest('GET', `/releases/tags/${tag}`);
+        if (!releaseData || !releaseData.assets) {
+            return res.status(404).send("Release or assets not found");
+        }
+
+        const asset = releaseData.assets.find(a => a.name === filename);
+        if (!asset) {
+            return res.status(404).send(`Asset named '${filename}' not found in release ${tag}`);
+        }
+
+        // 2. Query GitHub API for redirect to S3 storage
+        const options = {
+            hostname: 'api.github.com',
+            path: `/repos/${process.env.GITHUB_REPO}/releases/assets/${asset.id}`,
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${process.env.GITHUB_TOKEN}`,
+                'Accept': 'application/octet-stream',
+                'User-Agent': 'WebToApp-Builder'
+            }
+        };
+
+        const reqApi = https.request(options, (resApi) => {
+            if (resApi.statusCode === 302 && resApi.headers.location) {
+                // Redirect user to the presigned, completely public S3 download URL
+                console.log("Successfully retrieved redirect to S3. Redirecting user...");
+                res.redirect(resApi.headers.location);
+            } else {
+                console.error(`Failed to get S3 redirect: Status ${resApi.statusCode}`);
+                res.status(500).send(`Failed to fetch secure download location from GitHub: Status ${resApi.statusCode}`);
+            }
+        });
+
+        reqApi.on('error', (err) => {
+            console.error("API Redirect Request Error:", err);
+            res.status(500).send(`GitHub Connection error: ${err.message}`);
+        });
+        
+        reqApi.end();
+
+    } catch (e) {
+        console.error("Download endpoint exception:", e);
+        res.status(500).send(`Server download error: ${e.message}`);
+    }
 });
 
 // URL Iframe Proxy to bypass X-Frame-Options

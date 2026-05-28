@@ -96,5 +96,6 @@ module.exports = {
     uploadFileToGithub,
     triggerWorkflow,
     getLatestWorkflowRun,
+    githubRequest,
     isGithubEnvSet: () => !!(GITHUB_TOKEN && GITHUB_REPO)
 };
