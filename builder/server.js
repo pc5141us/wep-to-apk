@@ -245,7 +245,9 @@ app.post('/api/build', async (req, res) => {
             fs.writeFileSync(CONFIG_FILE_PATH, configString, 'utf8');
         }
 
-        const gradlewCmd = process.platform === 'win32' ? 'gradlew.bat' : './gradlew';
+        const gradlewCmd = process.platform === 'win32' 
+            ? path.join(ANDROID_PROJECT_DIR, 'gradlew.bat') 
+            : path.join(ANDROID_PROJECT_DIR, 'gradlew');
         
         const activeBuildProcess = spawn(gradlewCmd, ['assembleDebug', '--stacktrace'], {
             cwd: ANDROID_PROJECT_DIR,
