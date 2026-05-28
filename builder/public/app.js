@@ -48,6 +48,9 @@ const elements = {
     generateApkBtn: document.getElementById('generate-apk-btn'),
     previewAppBtn: document.getElementById('preview-app-btn'),
     buildStatusIndicator: document.getElementById('build-status-indicator'),
+    buildProgressContainer: document.getElementById('build-progress-container'),
+    buildProgressBar: document.getElementById('build-progress-bar'),
+    buildProgressText: document.getElementById('build-progress-text'),
     clearConsoleBtn: document.getElementById('clear-console-btn'),
     consoleStatusBadge: document.getElementById('console-status-badge'),
     
@@ -795,6 +798,42 @@ function setupBuildAction() {
             
             logConsole("Configuration saved successfully! Initiating Gradle compiler...", 'success-msg');
             
+            // Progress Bar animation setup
+            let progress = 0;
+            let progressInterval = null;
+            
+            const startProgress = () => {
+                elements.buildProgressContainer.classList.remove('hidden');
+                elements.buildProgressBar.style.width = '0%';
+                elements.buildProgressText.textContent = '0%';
+                progress = 0;
+                
+                progressInterval = setInterval(() => {
+                    if (progress < 90) {
+                        const increment = Math.max(0.5, (90 - progress) / 30);
+                        progress += increment;
+                        const displayProgress = Math.min(90, Math.floor(progress));
+                        elements.buildProgressBar.style.width = `${displayProgress}%`;
+                        elements.buildProgressText.textContent = `${displayProgress}%`;
+                    }
+                }, 800);
+            };
+            
+            const completeProgress = (success) => {
+                if (progressInterval) clearInterval(progressInterval);
+                if (success) {
+                    elements.buildProgressBar.style.width = '100%';
+                    elements.buildProgressText.textContent = '100%';
+                    setTimeout(() => {
+                        elements.buildProgressContainer.classList.add('hidden');
+                    }, 3000);
+                } else {
+                    elements.buildProgressBar.style.width = '0%';
+                    elements.buildProgressText.textContent = '0%';
+                    elements.buildProgressContainer.classList.add('hidden');
+                }
+            };
+
             // Step 2: Trigger build command
             const buildRes = await fetch('/api/build', { method: 'POST' });
             if (!buildRes.ok) {
@@ -802,6 +841,7 @@ function setupBuildAction() {
             }
             
             updateBuildStatus('building');
+            startProgress();
             
             // Step 3: Listen to event source logs in real-time
             const eventSource = new EventSource('/api/build/logs');
@@ -815,11 +855,13 @@ function setupBuildAction() {
                     elements.generateApkBtn.disabled = false;
                     
                     if (data.status === 'success') {
+                        completeProgress(true);
                         logConsole(`🎉 App built successfully!`, 'success-msg');
                         logConsole(`📦 Package Name (اسم الحزمة): ${data.appId}`, 'success-msg');
-                        logConsole(`Output APK: ${data.apkName}`, 'success-msg');
+                        logConsole(`Output APK Link: ${data.apkName}`, 'success-msg');
                         renderApkDownloadButton(data.apkName, data.appId);
                     } else {
+                        completeProgress(false);
                         logConsole("❌ Compilation failed! Please review the terminal logs above.", 'error-msg');
                     }
                     return;
@@ -835,6 +877,7 @@ function setupBuildAction() {
             
             eventSource.onerror = (err) => {
                 eventSource.close();
+                completeProgress(false);
                 logConsole("EventSource connection lost.", 'error-msg');
                 elements.generateApkBtn.disabled = false;
                 updateBuildStatus('failed');
@@ -921,13 +964,14 @@ function updateBuildStatus(status) {
 
 // Render final APK Download Button
 function renderApkDownloadButton(filename, appId) {
+    const downloadHref = filename.startsWith('http') ? filename : `/builds/${filename}`;
     elements.apkDownloadContainer.innerHTML = `
         <div style="width: 100%; display: flex; flex-direction: column; gap: 8px;">
             <div style="background: rgba(16, 185, 129, 0.1); border: 1px dashed var(--success-color); border-radius: 6px; padding: 10px; text-align: center; font-size: 11px; color: var(--text-muted);">
                 اسم حزمة التطبيق المولد (Package Name):<br>
                 <code style="color: var(--success-color); font-weight: bold; font-family: monospace; font-size: 12px; margin-top: 4px; display: inline-block;">${appId}</code>
             </div>
-            <a href="/builds/${filename}" download="${filename}" class="btn-download animate-pulse">
+            <a href="${downloadHref}" target="_blank" class="btn-download animate-pulse">
                 <i class="fa-solid fa-circle-down"></i>
                 تحميل ملف الـ APK المجمّع
             </a>

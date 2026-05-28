@@ -74,10 +74,13 @@ async function uploadFileToGithub(filePath, base64Content, commitMessage) {
     return githubRequest('PUT', `/contents/${filePath}`, data);
 }
 
-async function triggerWorkflow() {
+async function triggerWorkflow(appName, appPackage) {
     return githubRequest('POST', `/actions/workflows/build-apk.yml/dispatches`, {
         ref: 'main',
-        inputs: {}
+        inputs: {
+            appName: appName || 'WebToApp',
+            appPackage: appPackage || 'com.example.webtoapp'
+        }
     });
 }
 

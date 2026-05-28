@@ -7,12 +7,16 @@ on:
         description: 'App Name'
         required: true
         default: 'WebToApp'
+      appPackage:
+        description: 'App Package'
+        required: true
+        default: 'com.example.webtoapp'
 
 jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # Needed for creating a release if we want to
+      contents: write # Needed for creating a release
 
     steps:
       - name: Checkout Code
@@ -40,9 +44,17 @@ jobs:
         run: ./gradlew assembleDebug --stacktrace
         working-directory: ./WebToApp
 
-      - name: Upload APK Artifact
-        uses: actions/upload-artifact@v4
+      - name: Rename APK
+        run: |
+          mv WebToApp/app/build/outputs/apk/debug/app-debug.apk "WebToApp/app/build/outputs/apk/debug/${{ github.event.inputs.appName }}.apk"
+
+      - name: Create Release and Upload APK
+        uses: softprops/action-gh-release@v2
         with:
-          name: app-debug-${{ github.run_id }}
-          path: WebToApp/app/build/outputs/apk/debug/app-debug.apk
-          retention-days: 7
+          tag_name: "v-${{ github.run_number }}"
+          name: "Build #${{ github.run_number }} - ${{ github.event.inputs.appName }}"
+          files: "WebToApp/app/build/outputs/apk/debug/${{ github.event.inputs.appName }}.apk"
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

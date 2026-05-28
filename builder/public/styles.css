@@ -438,6 +438,49 @@ body {
     color: var(--error-color);
 }
 
+/* Premium Build Progress Bar */
+.build-progress-container {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 10px;
+    background: rgba(255, 255, 255, 0.05);
+    padding: 10px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.build-progress-container.hidden {
+    display: none !important;
+}
+
+.progress-bar-wrapper {
+    flex: 1;
+    height: 8px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 9999px;
+    overflow: hidden;
+    position: relative;
+}
+
+.build-progress-bar {
+    width: 0%;
+    height: 100%;
+    background: linear-gradient(90deg, var(--primary-color), var(--success-color));
+    border-radius: 9999px;
+    transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 0 8px var(--primary-color);
+}
+
+.build-progress-text {
+    font-size: 12px;
+    font-weight: 700;
+    font-family: monospace;
+    color: var(--text-color);
+    min-width: 36px;
+    text-align: right;
+}
+
 /* Center Live Preview Panel */
 .preview-panel {
     display: flex;

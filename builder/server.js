@@ -130,7 +130,44 @@ app.post('/api/build', async (req, res) => {
         
         if (githubApi.isGithubEnvSet()) {
             buildLogs.push("Triggering GitHub Actions Build Workflow...");
-            await githubApi.triggerWorkflow();
+            
+            // State-safe config fetch from GitHub
+            let appName = 'WebToApp';
+            let appPackage = 'com.example.webtoapp';
+            try {
+                const https = require('https');
+                const configData = await new Promise((resolve, reject) => {
+                    const options = {
+                        hostname: 'api.github.com',
+                        path: `/repos/${process.env.GITHUB_REPO}/contents/WebToApp/app/src/main/assets/app_config.json`,
+                        headers: { 
+                            'User-Agent': 'WebToApp-Builder', 
+                            'Authorization': `Bearer ${process.env.GITHUB_TOKEN}`,
+                            'Accept': 'application/vnd.github.v3+json'
+                        }
+                    };
+                    https.get(options, (response) => {
+                        let data = '';
+                        response.on('data', chunk => data += chunk);
+                        response.on('end', () => {
+                            try {
+                                resolve(JSON.parse(data));
+                            } catch(e) {
+                                resolve({});
+                            }
+                        });
+                    }).on('error', reject);
+                });
+                if (configData.content) {
+                    const decoded = JSON.parse(Buffer.from(configData.content, 'base64').toString('utf8'));
+                    appName = decoded.appName || appName;
+                    appPackage = decoded.appPackage || appPackage;
+                }
+            } catch (e) {
+                console.error("Failed to read latest config from GitHub:", e);
+            }
+            
+            await githubApi.triggerWorkflow(appName, appPackage);
             buildLogs.push("Workflow triggered successfully!");
             buildLogs.push("Waiting for GitHub Actions to start...");
             
@@ -182,6 +219,42 @@ app.get('/api/build/logs', async (req, res) => {
     res.flushHeaders();
 
     if (githubApi.isGithubEnvSet()) {
+        // State-safe config fetch from GitHub
+        let appName = 'WebToApp';
+        let appPackage = 'com.example.webtoapp';
+        try {
+            const https = require('https');
+            const configData = await new Promise((resolve, reject) => {
+                const options = {
+                    hostname: 'api.github.com',
+                    path: `/repos/${process.env.GITHUB_REPO}/contents/WebToApp/app/src/main/assets/app_config.json`,
+                    headers: { 
+                        'User-Agent': 'WebToApp-Builder', 
+                        'Authorization': `Bearer ${process.env.GITHUB_TOKEN}`,
+                        'Accept': 'application/vnd.github.v3+json'
+                    }
+                };
+                https.get(options, (response) => {
+                    let data = '';
+                    response.on('data', chunk => data += chunk);
+                    response.on('end', () => {
+                        try {
+                            resolve(JSON.parse(data));
+                        } catch(e) {
+                            resolve({});
+                        }
+                    });
+                }).on('error', reject);
+            });
+            if (configData.content) {
+                const decoded = JSON.parse(Buffer.from(configData.content, 'base64').toString('utf8'));
+                appName = decoded.appName || appName;
+                appPackage = decoded.appPackage || appPackage;
+            }
+        } catch (e) {
+            console.error("Failed to read latest config inside logs:", e);
+        }
+
         // Poll GitHub Actions
         const intervalId = setInterval(async () => {
             try {
@@ -189,10 +262,20 @@ app.get('/api/build/logs', async (req, res) => {
                 if (run) {
                     res.write(`data: ${JSON.stringify({ log: `GitHub Action Status: ${run.status} (${run.conclusion || 'running'})`, status: buildStatus })}\n\n`);
                     if (run.status === 'completed') {
-                        const dlLink = run.html_url; // Link to the run page where artifact is
                         buildStatus = run.conclusion === 'success' ? 'success' : 'failed';
-                        res.write(`data: ${JSON.stringify({ log: `Build finished. Download APK from GitHub: ${dlLink}`, status: buildStatus })}\n\n`);
-                        res.write(`data: ${JSON.stringify({ log: "STREAM_END", status: buildStatus })}\n\n`);
+                        const downloadUrl = `https://github.com/${process.env.GITHUB_REPO}/releases/download/v-${run.run_number}/${encodeURIComponent(appName)}.apk`;
+                        res.write(`data: ${JSON.stringify({ 
+                            log: `Build finished with status: ${buildStatus}`, 
+                            status: buildStatus,
+                            apkName: downloadUrl,
+                            appId: appPackage
+                        })}\n\n`);
+                        res.write(`data: ${JSON.stringify({ 
+                            log: "STREAM_END", 
+                            status: buildStatus,
+                            apkName: downloadUrl,
+                            appId: appPackage
+                        })}\n\n`);
                         clearInterval(intervalId);
                         res.end();
                     }

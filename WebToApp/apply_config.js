@@ -109,6 +109,24 @@ async function updateAppIcon(logoUrl) {
     }
 }
 
+function updatePackageName(appPackage) {
+    if (!appPackage) return;
+    const GRADLE_FILE_PATH = path.join(ANDROID_PROJECT_DIR, 'app/build.gradle.kts');
+    if (!fs.existsSync(GRADLE_FILE_PATH)) {
+        console.log("Gradle file not found, skipping package name update");
+        return;
+    }
+    let content = fs.readFileSync(GRADLE_FILE_PATH, 'utf8');
+    
+    // Replace default applicationId
+    content = content.replace(/applicationId\s*=\s*"[^"]*"/g, `applicationId = "${appPackage}"`);
+    // Replace dynamic applicationId check
+    content = content.replace(/applicationId\s*=\s*project\.property\("customApplicationId"\)\s*as\s*String/g, `applicationId = "${appPackage}"`);
+    
+    fs.writeFileSync(GRADLE_FILE_PATH, content, 'utf8');
+    console.log(`Updated build.gradle.kts with package name: ${appPackage}`);
+}
+
 async function main() {
     if (!fs.existsSync(CONFIG_FILE_PATH)) {
         console.log("No config found, skipping pre-build apply");
@@ -117,6 +135,9 @@ async function main() {
     const config = JSON.parse(fs.readFileSync(CONFIG_FILE_PATH, 'utf8'));
     if (config.appName) {
         updateAppNameInStrings(config.appName);
+    }
+    if (config.appPackage) {
+        updatePackageName(config.appPackage);
     }
     if (config.logoUrl) {
         await updateAppIcon(config.logoUrl);
