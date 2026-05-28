@@ -226,6 +226,76 @@ app.get('/api/build/logs', async (req, res) => {
     req.on('close', () => clearInterval(intervalId));
 });
 
+// URL Iframe Proxy to bypass X-Frame-Options
+app.get('/api/proxy', (req, res) => {
+    let targetUrl = req.query.url;
+    if (!targetUrl) {
+        return res.status(400).send("URL parameter is required");
+    }
+
+    if (!/^https?:\/\//i.test(targetUrl)) {
+        targetUrl = 'https://' + targetUrl;
+    }
+
+    try {
+        const parsedUrl = new URL(targetUrl);
+        const protocol = parsedUrl.protocol === 'https:' ? https : http;
+
+        const requestOptions = {
+            hostname: parsedUrl.hostname,
+            port: parsedUrl.port || (parsedUrl.protocol === 'https:' ? 443 : 80),
+            path: parsedUrl.pathname + parsedUrl.search,
+            method: 'GET',
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.5'
+            }
+        };
+
+        const proxyReq = protocol.request(requestOptions, (proxyRes) => {
+            if (proxyRes.statusCode >= 300 && proxyRes.statusCode < 400 && proxyRes.headers.location) {
+                let redirectUrl = proxyRes.headers.location;
+                if (!redirectUrl.startsWith('http')) {
+                    redirectUrl = new URL(redirectUrl, targetUrl).href;
+                }
+                return res.redirect(`/api/proxy?url=${encodeURIComponent(redirectUrl)}`);
+            }
+
+            res.setHeader('Content-Type', proxyRes.headers['content-type'] || 'text/html');
+
+            let body = [];
+            proxyRes.on('data', (chunk) => body.push(chunk));
+
+            proxyRes.on('end', () => {
+                const buffer = Buffer.concat(body);
+                const contentType = proxyRes.headers['content-type'] || '';
+                
+                if (contentType.includes('text/html')) {
+                    let html = buffer.toString('utf8');
+                    const baseTag = `<base href="${parsedUrl.protocol}//${parsedUrl.host}${parsedUrl.pathname}">`;
+                    
+                    if (html.includes('<head>')) {
+                        html = html.replace('<head>', `<head>${baseTag}`);
+                    } else if (html.includes('<HEAD>')) {
+                        html = html.replace('<HEAD>', `<HEAD>${baseTag}`);
+                    } else {
+                        html = baseTag + html;
+                    }
+                    res.send(html);
+                } else {
+                    res.send(buffer);
+                }
+            });
+        });
+
+        proxyReq.on('error', (err) => res.status(500).send(`Proxy Error: ${err.message}`));
+        proxyReq.end();
+    } catch (err) {
+        res.status(500).send(`Invalid URL: ${err.message}`);
+    }
+});
+
 // Export for Vercel
 module.exports = app;
 
