@@ -14,11 +14,20 @@ const CONFIG_FILE_PATH = path.join(ANDROID_PROJECT_DIR, 'app/src/main/assets/app
 const BUILDS_DIR = path.join(__dirname, 'public/builds');
 const SESSIONS_DIR = path.join(__dirname, 'sessions');
 
-if (!fs.existsSync(BUILDS_DIR)) {
-    fs.mkdirSync(BUILDS_DIR, { recursive: true });
+try {
+    if (!fs.existsSync(BUILDS_DIR)) {
+        fs.mkdirSync(BUILDS_DIR, { recursive: true });
+    }
+} catch (e) {
+    console.warn(`[WARNING] Failed to create BUILDS_DIR: ${e.message}`);
 }
-if (!fs.existsSync(SESSIONS_DIR)) {
-    fs.mkdirSync(SESSIONS_DIR, { recursive: true });
+
+try {
+    if (!fs.existsSync(SESSIONS_DIR)) {
+        fs.mkdirSync(SESSIONS_DIR, { recursive: true });
+    }
+} catch (e) {
+    console.warn(`[WARNING] Failed to create SESSIONS_DIR: ${e.message}`);
 }
 
 // Session state storage
@@ -41,9 +50,47 @@ function getSessionConfigPath(sessionId) {
     const id = sessionId || 'default';
     const dir = path.join(SESSIONS_DIR, id);
     if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
+        try {
+            fs.mkdirSync(dir, { recursive: true });
+        } catch (e) {
+            // Ignore directory creation errors on read-only filesystems (e.g. Vercel)
+        }
     }
     return path.join(dir, 'app_config.json');
+}
+
+// In-memory config storage fallback for serverless environments (Vercel)
+const memoryConfigs = {};
+
+function getSessionConfig(sessionId) {
+    const id = sessionId || 'default';
+    if (memoryConfigs[id]) {
+        return memoryConfigs[id];
+    }
+    
+    const sessionConfigPath = getSessionConfigPath(id);
+    if (fs.existsSync(sessionConfigPath)) {
+        try {
+            const config = JSON.parse(fs.readFileSync(sessionConfigPath, 'utf8'));
+            memoryConfigs[id] = config;
+            return config;
+        } catch (e) {
+            console.error("Error reading session config file:", e);
+        }
+    }
+    return null;
+}
+
+function saveSessionConfig(sessionId, config) {
+    const id = sessionId || 'default';
+    memoryConfigs[id] = config;
+    
+    const sessionConfigPath = getSessionConfigPath(id);
+    try {
+        fs.writeFileSync(sessionConfigPath, JSON.stringify(config, null, 2), 'utf8');
+    } catch (e) {
+        console.warn(`[WARNING] Failed to write session config to disk: ${e.message}`);
+    }
 }
 
 app.use((req, res, next) => {
@@ -58,11 +105,10 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.get('/api/config', async (req, res) => {
     try {
         const sessionId = req.query.sessionId || 'default';
-        const sessionConfigPath = getSessionConfigPath(sessionId);
-
+        
         // If session specific config exists, return it
-        if (fs.existsSync(sessionConfigPath)) {
-            const config = JSON.parse(fs.readFileSync(sessionConfigPath, 'utf8'));
+        const config = getSessionConfig(sessionId);
+        if (config) {
             return res.json(config);
         }
 
@@ -82,10 +128,10 @@ app.get('/api/config', async (req, res) => {
                         const parsed = JSON.parse(data);
                         if (parsed.content) {
                             const decoded = Buffer.from(parsed.content, 'base64').toString('utf8');
-                            const config = JSON.parse(decoded);
-                            // Cache to session config path
-                            fs.writeFileSync(sessionConfigPath, JSON.stringify(config, null, 2), 'utf8');
-                            res.json(config);
+                            const gitConfig = JSON.parse(decoded);
+                            // Cache to session config
+                            saveSessionConfig(sessionId, gitConfig);
+                            res.json(gitConfig);
                         } else {
                             res.status(404).json({ error: "Config not found on GitHub" });
                         }
@@ -111,7 +157,7 @@ app.get('/api/config', async (req, res) => {
             showProgressBar: true,
             userAgent: ""
         };
-        fs.writeFileSync(sessionConfigPath, JSON.stringify(defaultEmptyConfig, null, 2), 'utf8');
+        saveSessionConfig(sessionId, defaultEmptyConfig);
         res.json(defaultEmptyConfig);
     } catch (e) {
         res.status(500).json({ error: "Error loading configuration" });
@@ -122,11 +168,10 @@ app.get('/api/config', async (req, res) => {
 app.post('/api/config', async (req, res) => {
     try {
         const sessionId = req.query.sessionId || req.body.sessionId || 'default';
-        const sessionConfigPath = getSessionConfigPath(sessionId);
         const config = req.body;
         const configString = JSON.stringify(config, null, 2);
         
-        fs.writeFileSync(sessionConfigPath, configString, 'utf8');
+        saveSessionConfig(sessionId, config);
 
         if (githubApi.isGithubEnvSet()) {
             // Push to GitHub
@@ -165,8 +210,13 @@ app.post('/api/upload-icon', async (req, res) => {
         // Local fallback
         const destPath = path.join(BUILDS_DIR, fileName);
         const base64Content = base64Data.replace(/^data:image\/\w+;base64,/, '');
-        fs.writeFileSync(destPath, base64Content, 'base64');
-        res.json({ success: true, url: `/builds/${fileName}` });
+        try {
+            fs.writeFileSync(destPath, base64Content, 'base64');
+            res.json({ success: true, url: `/builds/${fileName}` });
+        } catch (e) {
+            console.error("Icon upload write error:", e);
+            res.status(500).json({ error: `Failed to save uploaded icon: ${e.message}` });
+        }
     } catch (e) {
         res.status(500).json({ error: `Error saving image: ${e.message}` });
     }
@@ -206,9 +256,8 @@ app.post('/api/build', async (req, res) => {
                 appConfigStr = JSON.stringify(config);
                 console.log(`Using dynamic configuration passed in request body: ${appName}`);
             } else {
-                const sessionConfigPath = getSessionConfigPath(sessionId);
-                if (fs.existsSync(sessionConfigPath)) {
-                    const decoded = JSON.parse(fs.readFileSync(sessionConfigPath, 'utf8'));
+                const decoded = getSessionConfig(sessionId);
+                if (decoded) {
                     appName = decoded.appName || appName;
                     appPackage = decoded.appPackage || appPackage;
                     appConfigStr = JSON.stringify(decoded);
@@ -232,24 +281,28 @@ app.post('/api/build', async (req, res) => {
         session.buildLogs.push("Starting local Gradle build...");
         
         // Copy session's config to main app_config.json so compiler uses it!
-        const sessionConfigPath = getSessionConfigPath(sessionId);
-        if (fs.existsSync(sessionConfigPath)) {
-            const configString = fs.readFileSync(sessionConfigPath, 'utf8');
-            const assetsDir = path.dirname(CONFIG_FILE_PATH);
-            if (!fs.existsSync(assetsDir)) {
-                fs.mkdirSync(assetsDir, { recursive: true });
-            }
-            fs.writeFileSync(CONFIG_FILE_PATH, configString, 'utf8');
-            
-            // Run apply_config.js to update Android resources (App Name, Package Name, Icon)
+        const sessionConfig = getSessionConfig(sessionId);
+        if (sessionConfig) {
+            const configString = JSON.stringify(sessionConfig, null, 2);
             try {
-                const { execSync } = require('child_process');
-                session.buildLogs.push("Applying configuration to Android resources...");
-                execSync('node apply_config.js', { cwd: ANDROID_PROJECT_DIR });
-                session.buildLogs.push("Configuration applied successfully!");
+                const assetsDir = path.dirname(CONFIG_FILE_PATH);
+                if (!fs.existsSync(assetsDir)) {
+                    fs.mkdirSync(assetsDir, { recursive: true });
+                }
+                fs.writeFileSync(CONFIG_FILE_PATH, configString, 'utf8');
+                
+                // Run apply_config.js to update Android resources (App Name, Package Name, Icon)
+                try {
+                    const { execSync } = require('child_process');
+                    session.buildLogs.push("Applying configuration to Android resources...");
+                    execSync('node apply_config.js', { cwd: ANDROID_PROJECT_DIR });
+                    session.buildLogs.push("Configuration applied successfully!");
+                } catch (err) {
+                    session.buildLogs.push(`[WARNING] Failed to apply resource configuration: ${err.message}`);
+                    console.error("apply_config error:", err);
+                }
             } catch (err) {
-                session.buildLogs.push(`[WARNING] Failed to apply resource configuration: ${err.message}`);
-                console.error("apply_config error:", err);
+                session.buildLogs.push(`[WARNING] Failed to write config file locally: ${err.message}`);
             }
         }
 
