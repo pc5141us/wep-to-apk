@@ -130,6 +130,20 @@ fun MainAppContent(
             }
         ) {
             Scaffold(
+                topBar = {
+                    TopAppBar(
+                        title = { /* Empty title to hide URL/Name */ },
+                        navigationIcon = {
+                            IconButton(onClick = { scope.launch { drawerState.open() } }) {
+                                Icon(Icons.Default.Menu, contentDescription = "القائمة")
+                            }
+                        },
+                        colors = TopAppBarDefaults.topAppBarColors(
+                            containerColor = MaterialTheme.colorScheme.surface,
+                            titleContentColor = MaterialTheme.colorScheme.onSurface
+                        )
+                    )
+                },
                 modifier = modifier
             ) { paddingValues ->
                 Box(
