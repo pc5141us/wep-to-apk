@@ -143,43 +143,53 @@ app.post('/api/build', async (req, res) => {
                 console.error("Failed to get latest run ID before trigger:", e);
             }
             
-            // State-safe config fetch from GitHub
             let appName = 'WebToApp';
             let appPackage = 'com.example.webtoapp';
-            try {
-                const https = require('https');
-                const configData = await new Promise((resolve, reject) => {
-                    const options = {
-                        hostname: 'api.github.com',
-                        path: `/repos/${process.env.GITHUB_REPO}/contents/WebToApp/app/src/main/assets/app_config.json`,
-                        headers: { 
-                            'User-Agent': 'WebToApp-Builder', 
-                            'Authorization': `Bearer ${process.env.GITHUB_TOKEN}`,
-                            'Accept': 'application/vnd.github.v3+json'
-                        }
-                    };
-                    https.get(options, (response) => {
-                        let data = '';
-                        response.on('data', chunk => data += chunk);
-                        response.on('end', () => {
-                            try {
-                                resolve(JSON.parse(data));
-                            } catch(e) {
-                                resolve({});
+            let appConfigStr = '{}';
+
+            if (req.body && req.body.config) {
+                const config = req.body.config;
+                appName = config.appName || appName;
+                appPackage = config.appPackage || appPackage;
+                appConfigStr = JSON.stringify(config);
+                console.log(`Using dynamic configuration passed in request body: ${appName}`);
+            } else {
+                try {
+                    const https = require('https');
+                    const configData = await new Promise((resolve, reject) => {
+                        const options = {
+                            hostname: 'api.github.com',
+                            path: `/repos/${process.env.GITHUB_REPO}/contents/WebToApp/app/src/main/assets/app_config.json`,
+                            headers: { 
+                                'User-Agent': 'WebToApp-Builder', 
+                                'Authorization': `Bearer ${process.env.GITHUB_TOKEN}`,
+                                'Accept': 'application/vnd.github.v3+json'
                             }
-                        });
-                    }).on('error', reject);
-                });
-                if (configData.content) {
-                    const decoded = JSON.parse(Buffer.from(configData.content, 'base64').toString('utf8'));
-                    appName = decoded.appName || appName;
-                    appPackage = decoded.appPackage || appPackage;
+                        };
+                        https.get(options, (response) => {
+                            let data = '';
+                            response.on('data', chunk => data += chunk);
+                            response.on('end', () => {
+                                try {
+                                    resolve(JSON.parse(data));
+                                } catch(e) {
+                                    resolve({});
+                                }
+                            });
+                        }).on('error', reject);
+                    });
+                    if (configData.content) {
+                        const decoded = JSON.parse(Buffer.from(configData.content, 'base64').toString('utf8'));
+                        appName = decoded.appName || appName;
+                        appPackage = decoded.appPackage || appPackage;
+                        appConfigStr = JSON.stringify(decoded);
+                    }
+                } catch (e) {
+                    console.error("Failed to read latest config from GitHub:", e);
                 }
-            } catch (e) {
-                console.error("Failed to read latest config from GitHub:", e);
             }
             
-            await githubApi.triggerWorkflow(appName, appPackage);
+            await githubApi.triggerWorkflow(appName, appPackage, appConfigStr);
             buildLogs.push("Workflow triggered successfully!");
             buildLogs.push("Waiting for GitHub Actions to start...");
             

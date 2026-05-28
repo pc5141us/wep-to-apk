@@ -392,21 +392,31 @@ function setupDrawerInteraction() {
     });
 }
 
-// Load Configuration from server on load
+// Load Configuration from server on load (with localStorage caching)
 async function loadConfiguration() {
     try {
-        const response = await fetch('/api/config');
-        if (response.ok) {
-            config = await response.json();
+        const cached = localStorage.getItem('app_config');
+        if (cached) {
+            config = JSON.parse(cached);
+            console.log("Loaded configuration from browser localStorage.");
+        } else {
+            const response = await fetch('/api/config');
+            if (response.ok) {
+                config = await response.json();
+                console.log("Loaded fallback configuration from server.");
+            }
+        }
+        
+        if (config) {
             config.sidebarItems = config.sidebarItems || [];
             
             // Populate inputs
-            elements.appNameInput.value = config.appName;
-            elements.primaryUrlInput.value = config.primaryUrl;
+            elements.appNameInput.value = config.appName || "";
+            elements.primaryUrlInput.value = config.primaryUrl || "";
             elements.logoUrlInput.value = config.logoUrl || "";
             elements.splashImageUrlInput.value = config.splashImageUrl || "";
             elements.appPackageInput.value = config.appPackage || "com.example.webtoapp";
-            elements.customHexInput.value = config.themeColorHex;
+            elements.customHexInput.value = config.themeColorHex || "#2196F3";
             
             if (config.isDarkTheme) {
                 elements.darkModeBtn.classList.add('active');
@@ -418,7 +428,7 @@ async function loadConfiguration() {
             
             // Populate color dot selection
             elements.colorDots.forEach(dot => {
-                if (dot.getAttribute('data-color').toLowerCase() === config.themeColorHex.toLowerCase()) {
+                if (config.themeColorHex && dot.getAttribute('data-color').toLowerCase() === config.themeColorHex.toLowerCase()) {
                     dot.classList.add('active');
                 } else {
                     dot.classList.remove('active');
@@ -761,9 +771,10 @@ function savePageItem() {
     saveConfigToServer();
 }
 
-// Save config payload to server automatically
+// Save config payload to server automatically and locally
 async function saveConfigToServer() {
     try {
+        localStorage.setItem('app_config', JSON.stringify(config));
         const response = await fetch('/api/config', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -786,6 +797,7 @@ function setupBuildAction() {
         elements.apkDownloadContainer.innerHTML = '';
         
         try {
+            localStorage.setItem('app_config', JSON.stringify(config));
             const saveRes = await fetch('/api/config', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -834,8 +846,12 @@ function setupBuildAction() {
                 }
             };
 
-            // Step 2: Trigger build command
-            const buildRes = await fetch('/api/build', { method: 'POST' });
+            // Step 2: Trigger build command passing config directly to isolate users
+            const buildRes = await fetch('/api/build', { 
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ config: config })
+            });
             if (!buildRes.ok) {
                 throw new Error("Failed to start Gradle build");
             }
@@ -962,21 +978,72 @@ function updateBuildStatus(status) {
     elements.buildStatusIndicator.innerHTML = `<i class="fa-solid ${getIndicatorIcon(status)}"></i> ${ArabicStatusText}`;
 }
 
+// Premium client-side file downloader to bypass AWS S3 default filename and rename to original Arabic name
+async function downloadFileWithCustomName(url, defaultName) {
+    const btn = document.getElementById('download-btn');
+    const originalHtml = btn ? btn.innerHTML : '';
+    
+    try {
+        logConsole("جاري تنزيل التطبيق بالاسم الأصلي في الخلفية، يرجى الانتظار...", 'system-msg');
+        
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> جاري التحضير...`;
+        }
+        
+        const response = await fetch(url);
+        if (!response.ok) throw new Error("Failed to download file");
+        
+        const blob = await response.blob();
+        const blobUrl = window.URL.createObjectURL(blob);
+        
+        const a = document.createElement('a');
+        a.href = blobUrl;
+        a.download = defaultName;
+        document.body.appendChild(a);
+        a.click();
+        
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(blobUrl);
+        
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = originalHtml;
+        }
+        logConsole("🎉 اكتمل تحميل التطبيق بنجاح بالاسم الأصلي المخصص!", 'success-msg');
+    } catch (e) {
+        console.error("Custom download failed, falling back to direct redirect:", e);
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = originalHtml;
+        }
+        window.open(url, '_blank');
+    }
+}
+
 // Render final APK Download Button
 function renderApkDownloadButton(filename, appId) {
     const downloadHref = (filename.startsWith('http') || filename.startsWith('/')) ? filename : `/builds/${filename}`;
+    
+    // Extract actual app name from config or use a fallback
+    const appName = config.appName ? `${config.appName}.apk` : 'app.apk';
+    
     elements.apkDownloadContainer.innerHTML = `
         <div style="width: 100%; display: flex; flex-direction: column; gap: 8px;">
             <div style="background: rgba(16, 185, 129, 0.1); border: 1px dashed var(--success-color); border-radius: 6px; padding: 10px; text-align: center; font-size: 11px; color: var(--text-muted);">
                 اسم حزمة التطبيق المولد (Package Name):<br>
                 <code style="color: var(--success-color); font-weight: bold; font-family: monospace; font-size: 12px; margin-top: 4px; display: inline-block;">${appId}</code>
             </div>
-            <a href="${downloadHref}" target="_blank" class="btn-download animate-pulse">
+            <button id="download-btn" class="btn-download animate-pulse" style="border: none; cursor: pointer; width: 100%;">
                 <i class="fa-solid fa-circle-down"></i>
                 تحميل ملف الـ APK المجمّع
-            </a>
+            </button>
         </div>
     `;
+    
+    document.getElementById('download-btn').addEventListener('click', () => {
+        downloadFileWithCustomName(downloadHref, appName);
+    });
 }
 
 // Icons Helper mappings
