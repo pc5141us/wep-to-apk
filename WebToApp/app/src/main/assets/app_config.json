@@ -1,7 +1,7 @@
 {
   "appName": "google",
   "primaryUrl": "https://google.com",
-  "logoUrl": "http://localhost:3000/builds/uploaded_icon_1779998010604.jpeg",
+  "logoUrl": "https://weptoapk.vercel.app/builds/uploaded_icon_1780001465178.jpeg",
   "appPackage": "com.fb.ha",
   "themeColorHex": "#2196F3",
   "isDarkTheme": false,
