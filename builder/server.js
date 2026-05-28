@@ -328,6 +328,13 @@ app.get('/api/build/logs', async (req, res) => {
     req.on('close', () => clearInterval(intervalId));
 });
 
+// Fail-safe redirect for cached clients prepending /builds/
+app.get('/builds/api/download', (req, res) => {
+    const query = req.url.split('?')[1];
+    console.log(`Fail-safe redirecting cached client request to /api/download?${query}`);
+    res.redirect(`/api/download?${query}`);
+});
+
 // Private Repo authenticated APK Download proxy endpoint
 app.get('/api/download', async (req, res) => {
     const { tag, filename } = req.query;
