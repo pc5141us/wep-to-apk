@@ -37,7 +37,7 @@ jobs:
         run: chmod +x ./WebToApp/gradlew
 
       - name: Build with Gradle
-        run: ./WebToApp/gradlew assembleDebug --stacktrace
+        run: ./gradlew assembleDebug --stacktrace
         working-directory: ./WebToApp
 
       - name: Upload APK Artifact
