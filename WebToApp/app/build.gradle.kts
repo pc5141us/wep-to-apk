@@ -9,9 +9,9 @@ android {
     compileSdk = 36
     defaultConfig {
         if (project.hasProperty("customApplicationId")) {
-            applicationId = project.property("customApplicationId") as String
+            applicationId = "com.wepto.apk"
         } else {
-            applicationId = "com.example.webtoapp"
+            applicationId = "com.wepto.apk"
         }
         minSdk = 24
         targetSdk = 36

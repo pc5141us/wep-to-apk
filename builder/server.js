@@ -46,6 +46,11 @@ function getSessionConfigPath(sessionId) {
     return path.join(dir, 'app_config.json');
 }
 
+app.use((req, res, next) => {
+    console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
+    next();
+});
+
 app.use(express.json({ limit: '10mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -243,6 +248,17 @@ app.post('/api/build', async (req, res) => {
                 fs.mkdirSync(assetsDir, { recursive: true });
             }
             fs.writeFileSync(CONFIG_FILE_PATH, configString, 'utf8');
+            
+            // Run apply_config.js to update Android resources (App Name, Package Name, Icon)
+            try {
+                const { execSync } = require('child_process');
+                session.buildLogs.push("Applying configuration to Android resources...");
+                execSync('node apply_config.js', { cwd: ANDROID_PROJECT_DIR });
+                session.buildLogs.push("Configuration applied successfully!");
+            } catch (err) {
+                session.buildLogs.push(`[WARNING] Failed to apply resource configuration: ${err.message}`);
+                console.error("apply_config error:", err);
+            }
         }
 
         const gradlewCmd = process.platform === 'win32' 
