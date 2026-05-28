@@ -4,6 +4,10 @@
     {
       "src": "builder/server.js",
       "use": "@vercel/node"
+    },
+    {
+      "src": "builder/public/**",
+      "use": "@vercel/static"
     }
   ],
   "routes": [
@@ -12,8 +16,12 @@
       "dest": "builder/server.js"
     },
     {
+      "src": "/",
+      "dest": "/builder/public/index.html"
+    },
+    {
       "src": "/(.*)",
-      "dest": "builder/public/$1"
+      "dest": "/builder/public/$1"
     }
   ]
 }
