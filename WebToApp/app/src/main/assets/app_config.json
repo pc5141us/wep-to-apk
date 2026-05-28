@@ -1,7 +1,7 @@
 {
   "appName": "تطبيق تجريبي",
-  "primaryUrl": "https://google.com",
-  "logoUrl": "",
+  "primaryUrl": "https://weptoapk.vercel.app/",
+  "logoUrl": "https://www.google.com/s2/favicons?sz=256&domain=weptoapk.vercel.app",
   "splashImageUrl": "",
   "appPackage": "com.demo.test",
   "themeColorHex": "#FF5722",
