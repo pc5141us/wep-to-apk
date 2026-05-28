@@ -402,7 +402,7 @@ function setupDrawerInteraction() {
 // Load Configuration from server on load (with localStorage caching)
 async function loadConfiguration() {
     try {
-        const cached = localStorage.getItem('app_config');
+        const cached = localStorage.getItem(`app_config_${sessionId}`);
         if (cached) {
             config = JSON.parse(cached);
             console.log("Loaded configuration from browser localStorage.");
@@ -781,7 +781,7 @@ function savePageItem() {
 // Save config payload to server automatically and locally
 async function saveConfigToServer() {
     try {
-        localStorage.setItem('app_config', JSON.stringify(config));
+        localStorage.setItem(`app_config_${sessionId}`, JSON.stringify(config));
         const response = await fetch(`/api/config?sessionId=${sessionId}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -804,7 +804,7 @@ function setupBuildAction() {
         elements.apkDownloadContainer.innerHTML = '';
         
         try {
-            localStorage.setItem('app_config', JSON.stringify(config));
+            localStorage.setItem(`app_config_${sessionId}`, JSON.stringify(config));
             const saveRes = await fetch(`/api/config?sessionId=${sessionId}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
