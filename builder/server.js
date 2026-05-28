@@ -354,15 +354,10 @@ app.get('/api/build/logs', async (req, res) => {
         let appName = 'WebToApp';
         let appPackage = 'com.example.webtoapp';
         
-        const sessionConfigPath = getSessionConfigPath(sessionId);
-        if (fs.existsSync(sessionConfigPath)) {
-            try {
-                const decoded = JSON.parse(fs.readFileSync(sessionConfigPath, 'utf8'));
-                appName = decoded.appName || appName;
-                appPackage = decoded.appPackage || appPackage;
-            } catch (e) {
-                console.error("Failed to read session config inside logs:", e);
-            }
+        const decoded = getSessionConfig(sessionId);
+        if (decoded) {
+            appName = decoded.appName || appName;
+            appPackage = decoded.appPackage || appPackage;
         }
 
         // Poll GitHub Actions
@@ -447,7 +442,11 @@ app.get('/api/download', async (req, res) => {
             return res.status(404).send("Release or assets not found");
         }
 
-        const asset = releaseData.assets.find(a => a.name === filename || a.label === filename);
+        let asset = releaseData.assets.find(a => a.name === filename || a.label === filename);
+        if (!asset) {
+            // Fallback: search for any .apk asset in the release
+            asset = releaseData.assets.find(a => a.name.endsWith('.apk'));
+        }
         if (!asset) {
             return res.status(404).send(`Asset named '${filename}' not found in release ${tag}`);
         }
