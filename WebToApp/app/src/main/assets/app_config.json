@@ -1,5 +1,13 @@
 {
-  "appName": "TestApp",
-  "appPackage": "com.test.app",
-  "primaryUrl": "https://google.com"
+  "appName": "منشئ التطبيقات",
+  "primaryUrl": "https://weptoapk.vercel.app/",
+  "logoUrl": "https://weptoapk.vercel.app/builds/uploaded_icon_session_oc0mxn91h_1780011294444.jpeg",
+  "splashImageUrl": "",
+  "appPackage": "com.doma.apk",
+  "themeColorHex": "#3F51B5",
+  "isDarkTheme": true,
+  "sidebarItems": [],
+  "enableZoom": true,
+  "showProgressBar": true,
+  "userAgent": ""
 }
