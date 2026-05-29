@@ -268,7 +268,7 @@ app.post('/api/build', async (req, res) => {
             session.buildLogs.push("Workflow triggered successfully!");
             session.buildLogs.push("Waiting for GitHub Actions to start...");
             
-            res.json({ success: true, message: "GitHub Actions Build triggered" });
+            res.json({ success: true, message: "GitHub Actions Build triggered", buildStartTime: Date.now() });
             return;
         }
 
@@ -357,8 +357,12 @@ app.get('/api/build/logs', async (req, res) => {
             }
 
             const run = await githubApi.getLatestWorkflowRun();
+            const sinceTime = req.query.since ? parseInt(req.query.since) : 0;
+            
             if (run) {
-                if (session.lastRunId && run.id === session.lastRunId) {
+                // If run was created before our build request, it's the old run! We must wait.
+                const runCreatedAt = new Date(run.created_at).getTime();
+                if ((session.lastRunId && run.id === session.lastRunId) || (sinceTime && runCreatedAt < sinceTime)) {
                     return res.json({
                         logs: ["Waiting for GitHub Actions to register the new build request..."],
                         status: 'building'

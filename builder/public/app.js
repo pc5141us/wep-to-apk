@@ -864,6 +864,8 @@ function setupBuildAction() {
             if (!buildRes.ok) {
                 throw new Error("Failed to start Gradle build");
             }
+            const buildData = await buildRes.json();
+            const buildStartTime = buildData.buildStartTime || Date.now();
             
             updateBuildStatus('building');
             startProgress();
@@ -878,7 +880,7 @@ function setupBuildAction() {
             let lastLogCount = 0;
             const pollInterval = setInterval(async () => {
                 try {
-                    const res = await fetch(`/api/build/logs?sessionId=${sessionId}`);
+                    const res = await fetch(`/api/build/logs?sessionId=${sessionId}&since=${buildStartTime}`);
                     if (!res.ok) throw new Error("Connection error");
                     
                     const data = await res.json();
