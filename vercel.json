@@ -8,9 +8,17 @@
     {
       "src": "builder/public/**",
       "use": "@vercel/static"
+    },
+    {
+      "src": "builder/api/download.js",
+      "use": "@vercel/node"
     }
   ],
   "routes": [
+    {
+      "src": "/api/download",
+      "dest": "builder/api/download.js"
+    },
     {
       "src": "/api/(.*)",
       "dest": "builder/server.js"
