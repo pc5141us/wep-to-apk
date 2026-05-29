@@ -340,123 +340,86 @@ app.post('/api/build', async (req, res) => {
     }
 });
 
-// SSE endpoint to stream build logs
+// Get build logs and status
 app.get('/api/build/logs', async (req, res) => {
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
-    res.flushHeaders();
-
-    const sessionId = req.query.sessionId || 'default';
-    const session = getSession(sessionId);
-
-    if (githubApi.isGithubEnvSet()) {
-        let appName = 'WebToApp';
-        let appPackage = 'com.example.webtoapp';
+    try {
+        const sessionId = req.query.sessionId || 'default';
+        const session = getSession(sessionId);
         
-        const decoded = getSessionConfig(sessionId);
-        if (decoded) {
-            appName = decoded.appName || appName;
-            appPackage = decoded.appPackage || appPackage;
-        }
+        if (githubApi.isGithubEnvSet()) {
+            let appName = 'WebToApp';
+            let appPackage = 'com.example.webtoapp';
+            
+            const decoded = getSessionConfig(sessionId);
+            if (decoded) {
+                appName = decoded.appName || appName;
+                appPackage = decoded.appPackage || appPackage;
+            }
 
-        let lastReportedStepName = "";
-        let lastReportedStepStatus = "";
-        let lastReportedRunStatus = "";
-
-        // Poll GitHub Actions
-        const intervalId = setInterval(async () => {
-            try {
-                const run = await githubApi.getLatestWorkflowRun();
-                if (run) {
-                    if (session.lastRunId && run.id === session.lastRunId) {
-                        res.write(`data: ${JSON.stringify({ log: "Waiting for GitHub Actions to register the new build request...", status: 'building' })}\n\n`);
-                        return;
-                    }
-
-                    let detailedLog = null;
-                    const runStatusStr = `${run.status} (${run.conclusion || 'running'})`;
-
-                    try {
-                        const jobsData = await githubApi.githubRequest('GET', `/actions/runs/${run.id}/jobs`);
-                        if (jobsData && jobsData.jobs && jobsData.jobs.length > 0) {
-                            const job = jobsData.jobs[0];
-                            if (job.steps && job.steps.length > 0) {
-                                // Find active step or last completed step
-                                const activeStep = job.steps.find(s => s.status === 'in_progress')
-                                    || [...job.steps].reverse().find(s => s.status === 'completed')
-                                    || job.steps[0];
-                                
-                                if (activeStep) {
-                                    const stepInfo = `[GitHub Action] Step: ${activeStep.name} - ${activeStep.status}${activeStep.conclusion ? ` (${activeStep.conclusion})` : ''}`;
-                                    if (activeStep.name !== lastReportedStepName || activeStep.status !== lastReportedStepStatus) {
-                                        detailedLog = stepInfo;
-                                        lastReportedStepName = activeStep.name;
-                                        lastReportedStepStatus = activeStep.status;
-                                    }
-                                }
-                            }
-                        }
-                    } catch (err) {
-                        console.error("Error fetching workflow jobs:", err);
-                    }
-
-                    // Fallback to general run status if no step info or run status changed
-                    if (!detailedLog && runStatusStr !== lastReportedRunStatus) {
-                        detailedLog = `GitHub Action Status: ${runStatusStr}`;
-                        lastReportedRunStatus = runStatusStr;
-                    }
-
-                    if (detailedLog) {
-                        res.write(`data: ${JSON.stringify({ log: detailedLog, status: session.buildStatus })}\n\n`);
-                    }
-
-                    if (run.status === 'completed') {
-                        session.buildStatus = run.conclusion === 'success' ? 'success' : 'failed';
-                        const downloadUrl = `/api/download?tag=v-${run.run_number}&filename=${encodeURIComponent(appName)}.apk`;
-                        res.write(`data: ${JSON.stringify({ 
-                            log: `Build finished with status: ${session.buildStatus}`, 
-                            status: session.buildStatus,
-                            apkName: downloadUrl,
-                            appId: appPackage
-                        })}\n\n`);
-                        res.write(`data: ${JSON.stringify({ 
-                            log: "STREAM_END", 
-                            status: session.buildStatus,
-                            apkName: downloadUrl,
-                            appId: appPackage
-                        })}\n\n`);
-                        clearInterval(intervalId);
-                        res.end();
-                    }
+            const run = await githubApi.getLatestWorkflowRun();
+            if (run) {
+                if (session.lastRunId && run.id === session.lastRunId) {
+                    return res.json({
+                        logs: ["Waiting for GitHub Actions to register the new build request..."],
+                        status: 'building'
+                    });
                 }
-            } catch (e) {
-                res.write(`data: ${JSON.stringify({ log: `Error polling GitHub Actions: ${e.message}`, status: 'failed' })}\n\n`);
+                
+                let logs = [];
+                try {
+                    const jobsData = await githubApi.githubRequest('GET', `/actions/runs/${run.id}/jobs`);
+                    if (jobsData && jobsData.jobs && jobsData.jobs.length > 0) {
+                        const job = jobsData.jobs[0];
+                        if (job.steps && job.steps.length > 0) {
+                            job.steps.forEach(step => {
+                                logs.push(`[GitHub Action] Step: ${step.name} - ${step.status}${step.conclusion ? ` (${step.conclusion})` : ''}`);
+                            });
+                        }
+                    }
+                } catch (e) {
+                    logs.push(`GitHub Action Status: ${run.status} (${run.conclusion || 'running'})`);
+                }
+                
+                if (run.status === 'completed') {
+                    session.buildStatus = run.conclusion === 'success' ? 'success' : 'failed';
+                }
+                
+                const downloadUrl = `/api/download?tag=v-${run.run_number}&filename=${encodeURIComponent(appName)}.apk`;
+                
+                return res.json({
+                    logs: logs,
+                    status: session.buildStatus,
+                    apkName: downloadUrl,
+                    appId: appPackage
+                });
             }
-        }, 5000);
+        }
         
-        req.on('close', () => clearInterval(intervalId));
-        return;
-    }
-
-    // Local logging stream
-    let lastSentIndex = 0;
-    const intervalId = setInterval(() => {
-        if (lastSentIndex < session.buildLogs.length) {
-            for (let i = lastSentIndex; i < session.buildLogs.length; i++) {
-                res.write(`data: ${JSON.stringify({ log: session.buildLogs[i], status: session.buildStatus })}\n\n`);
+        // Local Build logs fallback
+        const appName = getSessionConfig(sessionId)?.appName || 'WebToApp';
+        const appPackage = getSessionConfig(sessionId)?.appPackage || 'com.example.webtoapp';
+        
+        if (session.buildStatus === 'success') {
+            const srcApk = path.join(ANDROID_PROJECT_DIR, 'app/build/outputs/apk/debug/app-debug.apk');
+            const destApk = path.join(BUILDS_DIR, `${appName}.apk`);
+            if (fs.existsSync(srcApk)) {
+                try {
+                    fs.copyFileSync(srcApk, destApk);
+                } catch(e) {
+                    console.error("Failed to copy compiled APK to builds folder:", e);
+                }
             }
-            lastSentIndex = session.buildLogs.length;
         }
 
-        if (session.buildStatus === 'success' || session.buildStatus === 'failed') {
-            res.write(`data: ${JSON.stringify({ log: "STREAM_END", status: session.buildStatus })}\n\n`);
-            clearInterval(intervalId);
-            res.end();
-        }
-    }, 200);
-
-    req.on('close', () => clearInterval(intervalId));
+        res.json({
+            logs: session.buildLogs,
+            status: session.buildStatus,
+            apkName: `/builds/${encodeURIComponent(appName)}.apk`,
+            appId: appPackage
+        });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
 });
 
 // Fail-safe redirect for cached clients prepending /builds/

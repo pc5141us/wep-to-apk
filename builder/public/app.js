@@ -874,59 +874,51 @@ function setupBuildAction() {
                 consoleTabBtn.click();
             }
             
-            // Step 3: Listen to event source logs in real-time
-            const eventSource = new EventSource(`/api/build/logs?sessionId=${sessionId}`);
-            
-            eventSource.onmessage = (e) => {
-                const data = JSON.parse(e.data);
-                
-                if (data.log === "STREAM_END") {
-                    buildCompleted = true;
-                    eventSource.close();
-                    updateBuildStatus(data.status);
-                    elements.generateApkBtn.disabled = false;
+            // Step 3: Poll build logs in real-time
+            let lastLogCount = 0;
+            const pollInterval = setInterval(async () => {
+                try {
+                    const res = await fetch(`/api/build/logs?sessionId=${sessionId}`);
+                    if (!res.ok) throw new Error("Connection error");
                     
-                    if (data.status === 'success') {
-                        completeProgress(true);
-                        logConsole(`🎉 App built successfully!`, 'success-msg');
-                        logConsole(`📦 Package Name (اسم الحزمة): ${data.appId}`, 'success-msg');
-                        logConsole(`Output APK Link: ${data.apkName}`, 'success-msg');
-                        renderApkDownloadButton(data.apkName, data.appId);
-                    } else {
-                        completeProgress(false);
-                        logConsole("❌ Compilation failed! Please review the terminal logs above.", 'error-msg');
+                    const data = await res.json();
+                    
+                    // Update build status
+                    updateBuildStatus(data.status);
+                    
+                    // Render new log lines if any
+                    if (data.logs.length > lastLogCount) {
+                        for (let i = lastLogCount; i < data.logs.length; i++) {
+                            const logLine = data.logs[i];
+                            if (logLine.startsWith('[ERROR]')) {
+                                logConsole(logLine, 'error-msg');
+                            } else {
+                                logConsole(logLine);
+                            }
+                        }
+                        lastLogCount = data.logs.length;
                     }
-                    return;
-                }
-                
-                if (isReconnecting) {
-                    elements.consoleOutputContainer.innerHTML = '';
-                    logConsole("تم إعادة الاتصال بنجاح. جاري تحديث سجلات التجميع...", 'success-msg');
-                    isReconnecting = false;
-                }
-
-                // Print logs in terminal window
-                if (data.log.startsWith('[ERROR]')) {
-                    logConsole(data.log, 'error-msg');
-                } else {
-                    logConsole(data.log);
-                }
-            };
-            
-            eventSource.onerror = (err) => {
-                if (eventSource.readyState === EventSource.CLOSED) {
-                    eventSource.close();
-                    if (!buildCompleted) {
-                        completeProgress(false);
-                        logConsole("انقطع الاتصال بالسيرفر بشكل نهائي (EventSource connection closed).", 'error-msg');
+                    
+                    // Check if build completed
+                    if (data.status === 'success' || data.status === 'failed') {
+                        clearInterval(pollInterval);
                         elements.generateApkBtn.disabled = false;
-                        updateBuildStatus('failed');
+                        
+                        if (data.status === 'success') {
+                            completeProgress(true);
+                            logConsole(`🎉 App built successfully!`, 'success-msg');
+                            logConsole(`📦 Package Name (اسم الحزمة): ${data.appId}`, 'success-msg');
+                            logConsole(`Output APK Link: ${data.apkName}`, 'success-msg');
+                            renderApkDownloadButton(data.apkName, data.appId);
+                        } else {
+                            completeProgress(false);
+                            logConsole("❌ Compilation failed! Please review the terminal logs above.", 'error-msg');
+                        }
                     }
-                } else if (eventSource.readyState === EventSource.CONNECTING) {
-                    isReconnecting = true;
-                    logConsole("فقد الاتصال بالسيرفر. جاري محاولة إعادة الاتصال تلقائياً...", 'system-msg');
+                } catch (err) {
+                    console.warn("Polling logs error:", err);
                 }
-            };
+            }, 3000);
             
         } catch (err) {
             logConsole(`Error: ${err.message}`, 'error-msg');
