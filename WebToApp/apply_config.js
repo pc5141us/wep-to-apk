@@ -35,14 +35,32 @@ function updateAppNameInStrings(appName) {
     console.log(`Updated strings.xml with app name: ${appName}`);
 }
 
-function downloadFile(url, dest) {
+function downloadFile(url, dest, redirectCount = 0) {
     return new Promise((resolve, reject) => {
+        if (redirectCount > 5) {
+            reject(new Error("Too many redirects"));
+            return;
+        }
+
         const protocol = url.startsWith('https') ? https : http;
         protocol.get(url, (response) => {
-            if (response.statusCode !== 200) {
-                reject(new Error(`Status code: ${response.statusCode}`));
+            const statusCode = response.statusCode;
+
+            // Handle HTTP redirects (301, 302, 307, 308)
+            if ([301, 302, 307, 308].includes(statusCode) && response.headers.location) {
+                let redirectUrl = response.headers.location;
+                if (!redirectUrl.startsWith('http')) {
+                    redirectUrl = new URL(redirectUrl, url).href;
+                }
+                resolve(downloadFile(redirectUrl, dest, redirectCount + 1));
                 return;
             }
+
+            if (statusCode !== 200) {
+                reject(new Error(`Status code: ${statusCode}`));
+                return;
+            }
+
             const file = fs.createWriteStream(dest);
             response.pipe(file);
             file.on('finish', () => file.close(resolve));
@@ -64,47 +82,60 @@ async function updateAppIcon(logoUrl) {
         localFilePath = path.join(__dirname, '../builder/public', logoUrl);
     }
 
-    const anydpiDir = path.join(ANDROID_PROJECT_DIR, 'app/src/main/res/mipmap-anydpi-v26');
-    const anydpiFiles = ['ic_launcher.xml', 'ic_launcher_round.xml'];
-    for (const xmlFile of anydpiFiles) {
-        const xmlPath = path.join(anydpiDir, xmlFile);
-        if (fs.existsSync(xmlPath)) {
-            try { fs.unlinkSync(xmlPath); console.log("Removed", xmlPath); } catch(e) {}
-        }
-    }
-
-    const mipmapFolders = ['mipmap-hdpi', 'mipmap-mdpi', 'mipmap-xhdpi', 'mipmap-xxhdpi', 'mipmap-xxxhdpi'];
+    const tempIconPath = path.join(ANDROID_PROJECT_DIR, `app/src/main/res/temp_icon_${Date.now()}.png`);
     const destExt = 'png';
 
-    for (const folder of mipmapFolders) {
-        const folderPath = path.join(ANDROID_PROJECT_DIR, 'app/src/main/res', folder);
-        if (!fs.existsSync(folderPath)) fs.mkdirSync(folderPath, { recursive: true });
+    try {
+        // Step 1: Secure the new logo to temporary storage first
+        if (isLocalFile && fs.existsSync(localFilePath)) {
+            fs.copyFileSync(localFilePath, tempIconPath);
+        } else if (logoUrl.startsWith('http')) {
+            await downloadFile(logoUrl, tempIconPath);
+        } else {
+            return; // invalid URL
+        }
 
-        const allExts = ['png', 'webp', 'jpg', 'jpeg'];
-        for (const name of ['ic_launcher', 'ic_launcher_round']) {
-            for (const e of allExts) {
-                const oldFile = path.join(folderPath, `${name}.${e}`);
-                if (fs.existsSync(oldFile)) {
-                    try { fs.unlinkSync(oldFile); } catch(err) {}
-                }
+        // Step 2: Clean up old anydpi files (only if we successfully got the new icon)
+        const anydpiDir = path.join(ANDROID_PROJECT_DIR, 'app/src/main/res/mipmap-anydpi-v26');
+        const anydpiFiles = ['ic_launcher.xml', 'ic_launcher_round.xml'];
+        for (const xmlFile of anydpiFiles) {
+            const xmlPath = path.join(anydpiDir, xmlFile);
+            if (fs.existsSync(xmlPath)) {
+                try { fs.unlinkSync(xmlPath); } catch(e) {}
             }
         }
 
-        const destIcon = path.join(folderPath, `ic_launcher.${destExt}`);
-        const destRoundIcon = path.join(folderPath, `ic_launcher_round.${destExt}`);
+        // Step 3: Replace old mipmaps with the new launcher icon
+        const mipmapFolders = ['mipmap-hdpi', 'mipmap-mdpi', 'mipmap-xhdpi', 'mipmap-xxhdpi', 'mipmap-xxxhdpi'];
+        for (const folder of mipmapFolders) {
+            const folderPath = path.join(ANDROID_PROJECT_DIR, 'app/src/main/res', folder);
+            if (!fs.existsSync(folderPath)) fs.mkdirSync(folderPath, { recursive: true });
 
-        try {
-            if (isLocalFile && fs.existsSync(localFilePath)) {
-                fs.copyFileSync(localFilePath, destIcon);
-            } else if (logoUrl.startsWith('http')) {
-                await downloadFile(logoUrl, destIcon);
-            } else {
-                continue;
+            const allExts = ['png', 'webp', 'jpg', 'jpeg'];
+            for (const name of ['ic_launcher', 'ic_launcher_round']) {
+                for (const e of allExts) {
+                    const oldFile = path.join(folderPath, `${name}.${e}`);
+                    if (fs.existsSync(oldFile)) {
+                        try { fs.unlinkSync(oldFile); } catch(err) {}
+                    }
+                }
             }
+
+            const destIcon = path.join(folderPath, `ic_launcher.${destExt}`);
+            const destRoundIcon = path.join(folderPath, `ic_launcher_round.${destExt}`);
+
+            fs.copyFileSync(tempIconPath, destIcon);
             fs.copyFileSync(destIcon, destRoundIcon);
             console.log(`Updated icon in ${folder}`);
-        } catch (e) {
-            console.error(`Failed to update icon for ${folder}:`, e.message);
+        }
+
+        // Clean up temporary icon file
+        try { fs.unlinkSync(tempIconPath); } catch(e) {}
+    } catch (e) {
+        console.error(`Failed to update app icon (using default icon fallback):`, e.message);
+        // Clean up temporary file if it was created
+        if (fs.existsSync(tempIconPath)) {
+            try { fs.unlinkSync(tempIconPath); } catch(err) {}
         }
     }
 }
