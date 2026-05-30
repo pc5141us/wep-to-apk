@@ -361,8 +361,11 @@ app.get('/api/build/logs', async (req, res) => {
             
             if (run) {
                 // If run was created before our build request, it's the old run! We must wait.
+                // We subtract 30 seconds (30000 ms) from sinceTime to account for clock drift between Vercel and GitHub.
                 const runCreatedAt = new Date(run.created_at).getTime();
-                if ((session.lastRunId && run.id === session.lastRunId) || (sinceTime && runCreatedAt < sinceTime)) {
+                const adjustedSinceTime = sinceTime > 30000 ? sinceTime - 30000 : 0;
+                
+                if ((session.lastRunId && run.id === session.lastRunId) || (sinceTime && runCreatedAt < adjustedSinceTime)) {
                     return res.json({
                         logs: ["Waiting for GitHub Actions to register the new build request..."],
                         status: 'building'
