@@ -1,13 +1,13 @@
 {
-  "appName": "منشئ التطبيقات الذكي",
-  "primaryUrl": "https://weptoapk.vercel.app",
-  "logoUrl": "https://www.google.com/s2/favicons?sz=256&domain=weptoapk.vercel.app",
+  "appName": "منشئ التطبيقات",
+  "primaryUrl": "https://weptoapk.vercel.app/",
+  "logoUrl": "https://weptoapk.vercel.app/builds/uploaded_icon_session_oc0mxn91h_1780011294444.jpeg",
   "splashImageUrl": "",
-  "appPackage": "com.doma.apk",
+  "appPackage": "com.doma.apk1",
   "themeColorHex": "#3F51B5",
   "isDarkTheme": true,
   "sidebarItems": [],
-  "enableZoom": false,
+  "enableZoom": true,
   "showProgressBar": true,
   "userAgent": ""
 }
